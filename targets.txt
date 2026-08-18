@@ -1,0 +1,4 @@
+# One target per line. Use a server or an explicit instance.
+# SQLSERVER01
+# SQLSERVER02\MSSQLSERVER
+# SQLSERVER03\REPORTING

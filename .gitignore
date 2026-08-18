@@ -1,0 +1,28 @@
+# Runtime and package media
+/Packages/*
+!/Packages/.gitkeep
+/Runs/*
+!/Runs/.gitkeep
+/Release/
+*.exe
+*.zip
+*.bak
+*.log
+*.partial
+*.clixml
+
+# Local/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Unpublished legacy development tree retained locally
+/config/
+/docs/
+/scripts/
+/src/
+/tests/
+/AGENTS.md
+/CHANGELOG.md
+/NEXT-STEPS.md
