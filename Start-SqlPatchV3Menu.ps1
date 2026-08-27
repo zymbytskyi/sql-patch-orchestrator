@@ -44,6 +44,21 @@ function Show-InventoryBlockers{
     if($State){Write-Host "Current stage: $($State.Stage)";foreach($server in @($State.Servers|Where-Object{$_.Status-in@('Blocked','Failed')})){Write-Host ("  {0}: {1} - {2}" -f $server.Server,$server.Status,$server.Message) -ForegroundColor Yellow}}
     Write-Host 'Fix the listed target, access, SQL, or standalone-safety issue, then run option 2 again.' -ForegroundColor Yellow
 }
+function Test-InventoryAccessDenied{
+    param($State)
+    if(-not$State){return $false}
+    return @($State.Servers|Where-Object{$_.Status-eq'Failed'-and$_.Message-match'(?i)Access is denied|0x80070005'}).Count-gt0
+}
+function Request-RemoteCredential{
+    param($State)
+    $blocked=@($State.Servers|Where-Object{$_.Status-eq'Failed'-and$_.Message-match'(?i)Access is denied|0x80070005'}|ForEach-Object Server)
+    Write-Host ("WinRM reached {0}, but Windows rejected account '{1}'." -f ($blocked-join', '),[Security.Principal.WindowsIdentity]::GetCurrent().Name) -ForegroundColor Yellow
+    Write-Host 'The alternate account must be a local Administrator and SQL sysadmin on every selected target.' -ForegroundColor Yellow
+    if((Read-Host 'Retry Inventory with another DOMAIN\User account? [y/N]')-notmatch'^(?i:y|yes)$'){return $null}
+    $entered=Get-Credential -Message 'SQL Patch V3: enter DOMAIN\User or user@domain. The credential remains only in this menu process.'
+    if(-not$entered){Write-Host 'Credential entry cancelled.' -ForegroundColor Yellow;return $null}
+    return $entered
+}
 $Cycle=Select-PatchCycle $Cycle
 $common=@{Cycle=$Cycle;PackageRoot=$PackageRoot;RunRoot=$RunRoot;Transport=$Transport}
 if($Credential){$common.Credential=$Credential}
@@ -56,6 +71,7 @@ try{while($true){
     Write-Host 'SQL PATCH V3 REMOTE - STANDALONE ONLY'
     Write-Host '====================================='
     Write-Host "Cycle: $Cycle"
+    Write-Host ("Remote account: {0}" -f $(if($common.ContainsKey('Credential')){$common.Credential.UserName}else{[Security.Principal.WindowsIdentity]::GetCurrent().Name+' (current Windows account)'}))
     Write-Host '1. Open target list (SERVER or SERVER\INSTANCE)'
     Write-Host '2. Inventory, backup review, and optional COPY_ONLY backup'
     Write-Host '3. Choose/download latest CUs, verify, and distribute (NO INSTALL)'
@@ -73,6 +89,20 @@ try{while($true){
                 & $engine -Mode Inventory @common
                 $inventoryCode=$LASTEXITCODE
                 Write-Host "Inventory exit code: $inventoryCode"
+                $inventoryState=Get-CycleState
+                if($inventoryCode-ne0-and(Test-InventoryAccessDenied $inventoryState)){
+                    $retryCredential=Request-RemoteCredential $inventoryState
+                    if($retryCredential){
+                        $Credential=$retryCredential
+                        $common.Credential=$Credential
+                        $retryCredential=$null
+                        Write-Host "Retrying Inventory as '$($Credential.UserName)'..." -ForegroundColor Cyan
+                        & $engine -Mode Inventory @common
+                        $inventoryCode=$LASTEXITCODE
+                        $inventoryState=Get-CycleState
+                        Write-Host "Retry Inventory exit code: $inventoryCode"
+                    }
+                }
                 if($inventoryCode-eq0){
                     $statePath=Join-Path (Join-Path $RunRoot (Get-CycleStorageKey $Cycle)) 'state.json'
                     $inventoryState=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
@@ -86,7 +116,7 @@ try{while($true){
                     if($backup-eq'1'){& $engine -Mode Backup @common -ConfirmBackup -BackupChoice 1;Write-Host "Backup exit code: $LASTEXITCODE"}
                     elseif($backup-ne'0'){throw 'Backup choice must be 0 or 1.'}
                 }else{
-                    Show-InventoryBlockers (Get-CycleState)
+                    Show-InventoryBlockers $inventoryState
                     Write-Host 'System backup was not offered because inventory did not pass.' -ForegroundColor Yellow
                 }
                 Pause-Menu
@@ -119,4 +149,4 @@ try{while($true){
     }
     catch{Write-Host "FAILED: $($_.Exception.Message)" -ForegroundColor Red;Pause-Menu}
 }}
-finally{$menuMutex.ReleaseMutex();$menuMutex.Dispose()}
+finally{if($common.ContainsKey('Credential')){$common.Remove('Credential')};$retryCredential=$null;$Credential=$null;$menuMutex.ReleaseMutex();$menuMutex.Dispose()}

@@ -1,8 +1,7 @@
-# SQL Patch Orchestrator V3.0.5
+# SQL Patch Orchestrator V3.0.6
 
-- Accepts any free-form cycle label without a date format or language requirement.
-- Keeps the exact DBA label in menu, state, console, dashboard, and `cycle-name.txt`.
-- Uses an internal SHA-256-derived directory key for arbitrary labels, preventing path traversal without restricting the operator's wording.
-- Reads its UTF-8 runtime files explicitly so multilingual labels remain intact on Windows PowerShell 5.1.
-- Preserves existing `MonthYYYY` runtime directories and all V3.0.4/V3.0.3 fixes.
+- Detects WinRM `Access is denied` during inventory and offers one interactive retry with another domain account.
+- Keeps the entered credential only in the running menu process and reuses it for preparation, preflight, apply, reboot, and post-verification.
+- Displays the account used for remote operations without exposing its password.
+- Preserves all V3.0.5 free-form cycle-name behavior.
 - Retains all media, standalone-safety, backup, hash, signature, and endpoint-security boundaries.

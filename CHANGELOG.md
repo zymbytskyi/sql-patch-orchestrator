@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.6 - 2026-08-27
+
+- Added an interactive credential retry when WinRM reaches a target but returns `Access is denied` during inventory.
+- Reuses the alternate domain credential for later phases in the same menu process and never writes it to disk, runtime state, logs, or Git.
+- Shows the active remote account in the menu and explains the required local Administrator and SQL sysadmin access.
+
 ## 3.0.5 - 2026-08-27
 
 - Removed all cycle-name format and language requirements; the DBA can use any descriptive label for production, emergency, test, or other work.
