@@ -8,17 +8,17 @@ Run Windows PowerShell as Administrator:
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-$p=Join-Path $env:TEMP 'Install-SqlPatchOrchestrator-3.0.1.ps1'
-Invoke-WebRequest 'https://raw.githubusercontent.com/zymbytskyi/sql-patch-orchestrator/v3.0.1/Install-FromGitHub.ps1' -UseBasicParsing -OutFile $p
-if((Get-FileHash $p -Algorithm SHA256).Hash-ne'647B114946F6B30DCA10AD9BBF99F48B63A0C4FB279E582DDA56CD2BBDC37E92'){throw 'Bootstrap SHA-256 mismatch.'}
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p -Version 3.0.1
+$p=Join-Path $env:TEMP 'Install-SqlPatchOrchestrator-3.0.2.ps1'
+Invoke-WebRequest 'https://raw.githubusercontent.com/zymbytskyi/sql-patch-orchestrator/v3.0.2/Install-FromGitHub.ps1' -UseBasicParsing -OutFile $p
+if((Get-FileHash $p -Algorithm SHA256).Hash-ne'97D1FC496D0592F5E7F8DB723ED9403651D7CFE0ED704525148066DABF54449D'){throw 'Bootstrap SHA-256 mismatch.'}
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p -Version 3.0.2
 ```
 
-The installer verifies the GitHub release SHA-256 digest, requests a Microsoft Defender scan when available, and installs to `C:\SqlPatchOrchestrator`.
+The installer verifies the GitHub release SHA-256 digest and installs to `C:\SqlPatchOrchestrator`. V3.0.2 does not start a blocking Microsoft Defender custom scan. It does not disable Defender, create exclusions, or change endpoint security policy.
 
 ## Install from ZIP
 
-Download `SqlPatchOrchestrator-v3.0.1.zip` from [Releases](https://github.com/zymbytskyi/sql-patch-orchestrator/releases/tag/v3.0.1), extract it to `C:\`, then run `C:\SqlPatchOrchestrator\Install.cmd` as administrator. The archive already contains the correct top-level folder.
+Download `SqlPatchOrchestrator-v3.0.2.zip` from [Releases](https://github.com/zymbytskyi/sql-patch-orchestrator/releases/tag/v3.0.2), extract it to `C:\`, then run `C:\SqlPatchOrchestrator\Install.cmd` as administrator. The archive already contains the correct top-level folder.
 
 ## Use
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0.2 - 2026-08-27
+
+- Removed explicit blocking Microsoft Defender custom scans from GitHub installation, controller package validation, and the target worker.
+- Retained release SHA-256 validation, per-file manifest verification, Microsoft Authenticode validation, product-major validation, and remote hash verification.
+- Did not disable Defender, add exclusions, or alter any endpoint security policy.
+- Aligned the target worker with the controller's existing standalone Enterprise edition support.
+
 ## 3.0.1 - 2026-08-27
 
 - Added interactive monthly cycle selection and menu-based cycle switching.

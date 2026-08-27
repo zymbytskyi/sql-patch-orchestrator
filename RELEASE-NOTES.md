@@ -1,9 +1,7 @@
-# SQL Patch Orchestrator V3.0.1
+# SQL Patch Orchestrator V3.0.2
 
-- Prompts for a validated monthly patch cycle at startup and allows switching cycles from menu option 8.
-- Makes menu option 2 explicitly offer verified `COPY_ONLY, CHECKSUM` backups of `master`, `model`, and `msdb` only.
-- Requires all three system databases to be ONLINE and successfully verified; `tempdb` and user databases remain excluded.
-- Uses the SQL 2017 registry fallback when `InstanceDefaultBackupPath` is unavailable.
-- Reports backup type, checksum status, and path, while calculating backup age on each target to avoid time-zone errors.
-- Prevents option 3 from downloading or distributing media while inventory is blocked and prints the exact server reasons.
-- Accepts standalone Enterprise edition while retaining the WSFC, FCI, Always On, and AG safety block.
+- Removes all explicit `Start-MpScan` custom scans that could block installation, preparation, or target-side Apply.
+- Does not disable Microsoft Defender, create exclusions, or change Azure/Microsoft Defender for Endpoint policy.
+- Retains GitHub release SHA-256 verification, archive manifest verification, Microsoft Authenticode validation, SQL major-version validation, and controller-to-target hash verification.
+- Aligns the target worker with the controller's standalone Enterprise edition support.
+- Includes all V3.0.1 monthly cycle, inventory gate, system backup, time-zone, and evidence fixes.

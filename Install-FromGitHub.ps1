@@ -29,7 +29,6 @@ try{
     $actualHash=(Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
     if($actualHash-ne$expectedHash){throw "Release ZIP SHA-256 mismatch. Expected $expectedHash; received $actualHash."}
     Write-Host "SHA-256 verified: $actualHash" -ForegroundColor Green
-    if(Get-Command Start-MpScan -ErrorAction SilentlyContinue){Write-Host 'Requesting Microsoft Defender scan...';Start-MpScan -ScanType CustomScan -ScanPath $zipPath}
     $extractRoot=Join-Path $temporaryRoot 'Extracted';Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot
     $installer=Join-Path $extractRoot 'SqlPatchOrchestrator\Install-SqlPatchOrchestrator.ps1'
     if(-not(Test-Path $installer -PathType Leaf)){throw 'The packaged installer is missing.'}

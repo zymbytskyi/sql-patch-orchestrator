@@ -272,7 +272,6 @@ function New-PackageRecord {
     $year=$supported[$Major];if([IO.Path]::GetFileName($Path)-notmatch"^SQLServer$year-KB\d+-x64\.exe$"){throw "Package '$Path' does not match SQL Server $year."}
     $sig=Get-AuthenticodeSignature -LiteralPath $Path
     if($sig.Status-ne'Valid'-or-not$sig.SignerCertificate-or$sig.SignerCertificate.Subject-notmatch'Microsoft Corporation'){throw "Package '$([IO.Path]::GetFileName($Path))' is not validly signed by Microsoft."}
-    if(Get-Command Start-MpScan -ErrorAction SilentlyContinue){Start-MpScan -ScanType CustomScan -ScanPath $Path}
     $version=[version](Get-Item -LiteralPath $Path).VersionInfo.ProductVersion
     if($version.Major-ne$Major){throw "Package '$([IO.Path]::GetFileName($Path))' product version does not match SQL major $Major."}
     $release=Get-PackageReleaseMetadata -Path $Path -Major $Major -Version $version.ToString()

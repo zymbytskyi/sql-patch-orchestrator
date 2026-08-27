@@ -12,9 +12,11 @@ $readme=Get-Content (Join-Path $root 'README.md') -Raw
 $version=(Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
 foreach($required in @('Select-PatchCycle','Patch cycle must use an English month and year','8. Select or create another patch cycle','Show-InventoryBlockers',"Stage-notin@('InventoryReady','Prepared','PreflightReady')")){if($menu-notmatch[regex]::Escape($required)){$failures.Add("Menu behavior missing: $required")}}
 foreach($required in @("SchemaVersion='1.4'",'AgeDays','IsCopyOnly-is[DBNull]','HasChecksum-is[DBNull]','BackupPath-is[DBNull]','^Enterprise Edition','Prepare was not started')){if($engine-notmatch[regex]::Escape($required)){$failures.Add("Engine behavior missing: $required")}}
-foreach($required in @("database_id IN (1,3,4)",'WITH COPY_ONLY, CHECKSUM','RESTORE VERIFYONLY FROM DISK','Created $created of $expected required backup(s)','xp_instance_regread')){if($worker-notmatch[regex]::Escape($required)){$failures.Add("Backup behavior missing: $required")}}
+foreach($required in @("database_id IN (1,3,4)",'WITH COPY_ONLY, CHECKSUM','RESTORE VERIFYONLY FROM DISK','Created $created of $expected required backup(s)','xp_instance_regread','^Enterprise Edition')){if($worker-notmatch[regex]::Escape($required)){$failures.Add("Backup behavior missing: $required")}}
 if($worker-match[regex]::Escape('Backup ''$path'' was not found.')){$failures.Add('Backup incorrectly requires the remoting DBA to have NTFS read access to the SQL-owned backup file.')}
-if($version-ne'3.0.1'-or$readme-notmatch'v3\.0\.1'){$failures.Add('Version, README, and release tag are inconsistent.')}
+if($version-ne'3.0.2'-or$readme-notmatch'v3\.0\.2'){$failures.Add('Version, README, and release tag are inconsistent.')}
+$installerText=Get-Content (Join-Path $root 'Install-FromGitHub.ps1') -Raw
+foreach($text in @($menu,$engine,$worker,$installerText)){if($text-match[regex]::Escape('Start-MpScan')){$failures.Add('An explicit blocking Microsoft Defender custom scan remains in an operational script.')}}
 $testRoot=Join-Path ([IO.Path]::GetTempPath()) ('SqlPatchV301-'+[guid]::NewGuid().ToString('N'))
 try{
     New-Item -ItemType Directory -Path $testRoot -Force|Out-Null

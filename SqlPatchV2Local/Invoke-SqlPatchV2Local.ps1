@@ -128,8 +128,8 @@ function Assert-SupportedStandalone {
     if ($clusterRegistry) { $reasons.Add('local WSFC configuration exists') }
     if ($clusterService -and $clusterService.Status -ne 'Stopped') { $reasons.Add("Cluster Service status=$($clusterService.Status)") }
     if ($reasons.Count) { throw "BLOCKED: clustered or Always On server detected: $($reasons -join '; '). V2 made no changes." }
-    $editionSupported = $Instance.Edition -match 'Express' -or $Instance.Edition -match '^Standard Edition' -or $Instance.Edition -match 'Standard Developer' -or $Instance.Edition -match 'Developer Edition'
-    if (-not $editionSupported) { throw "BLOCKED: edition '$($Instance.Edition)' is outside V2 scope. Supported: Express, Standard, Standard Developer, Developer." }
+    $editionSupported = $Instance.Edition -match 'Express' -or $Instance.Edition -match '^Standard Edition' -or $Instance.Edition -match 'Standard Developer' -or $Instance.Edition -match 'Developer Edition' -or $Instance.Edition -match '^Enterprise Edition'
+    if (-not $editionSupported) { throw "BLOCKED: edition '$($Instance.Edition)' is outside V2 scope. Supported: Express, Standard, Developer, Enterprise." }
     if (-not $Instance.IsSysadmin) { throw "BLOCKED: current Windows account is not SQL sysadmin on '$($Instance.DisplayName)'." }
     Write-Host 'Standalone safety gate: PASS' -ForegroundColor Green
 }
@@ -251,7 +251,6 @@ function Test-UpdatePackage {
     $signature = Get-AuthenticodeSignature -LiteralPath $Path
     if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') { throw "Package is not validly signed by Microsoft Corporation. Status=$($signature.Status)." }
     Write-Host 'Microsoft signature: VALID' -ForegroundColor Green
-    if (Get-Command Start-MpScan -ErrorAction SilentlyContinue) { Write-Host 'Running Microsoft Defender scan...'; Start-MpScan -ScanType CustomScan -ScanPath $Path }
 }
 
 try {
