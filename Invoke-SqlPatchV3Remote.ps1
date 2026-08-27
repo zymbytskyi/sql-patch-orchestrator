@@ -348,7 +348,22 @@ function Get-LatestPackageMap {
         $destination=Join-Path $PackageRoot $update.FileName
         if(-not(Test-Path -LiteralPath $destination -PathType Leaf)){
             $partial=$destination+'.download';Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
-            try{Write-Host "Downloading $($update.FileName) from Microsoft...";if(Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue){Start-BitsTransfer -Source $update.Uri -Destination $partial -DisplayName 'SQL Patch V3 preparation'}else{Invoke-WebRequest -Uri $update.Uri -OutFile $partial -UseBasicParsing};Move-Item -LiteralPath $partial -Destination $destination}
+            try{
+                Write-Host "Downloading $($update.FileName) from Microsoft..."
+                $downloaded=$false
+                if(Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue){
+                    try{
+                        Start-BitsTransfer -Source $update.Uri -Destination $partial -DisplayName 'SQL Patch V3 preparation'
+                        $downloaded=$true
+                    }
+                    catch{
+                        Write-Warning "BITS is unavailable in this session ($($_.Exception.Message)). Retrying over HTTPS."
+                        Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+                    }
+                }
+                if(-not$downloaded){Invoke-WebRequest -Uri $update.Uri -OutFile $partial -UseBasicParsing}
+                Move-Item -LiteralPath $partial -Destination $destination
+            }
             catch{Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue;throw}
         }
         $record=New-PackageRecord -Path $destination -Major ([int]$major)

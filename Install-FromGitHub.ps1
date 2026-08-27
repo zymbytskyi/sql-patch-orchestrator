@@ -10,8 +10,11 @@ $apiRoot="https://api.github.com/repos/$repository"
 $releaseUri=if($Version-eq'latest'){"$apiRoot/releases/latest"}else{"$apiRoot/releases/tags/v$Version"}
 $headers=@{Accept='application/vnd.github+json';'User-Agent'='SqlPatchOrchestrator-Installer'}
 $temporaryRoot=Join-Path ([IO.Path]::GetTempPath()) ('SqlPatchOrchestrator-'+[guid]::NewGuid().ToString('N'))
+$stage='reading GitHub release metadata'
+$timer=[Diagnostics.Stopwatch]::StartNew()
 try{
     [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+    Write-Host 'Reading GitHub release metadata...'
     $release=Invoke-RestMethod -Uri $releaseUri -Headers $headers -UseBasicParsing
     if($release.draft-or$release.prerelease){throw 'Draft and prerelease packages are not accepted.'}
     $assets=@($release.assets|Where-Object{$_.name-match'^SqlPatchOrchestrator-v\d+\.\d+\.\d+\.zip$'})
@@ -24,13 +27,23 @@ try{
     $expectedHash=$matches[1].ToUpperInvariant()
     New-Item -ItemType Directory -Path $temporaryRoot -Force|Out-Null
     $zipPath=Join-Path $temporaryRoot $asset.name
+    $stage='downloading the release ZIP'
     Write-Host "Downloading $($asset.name)..."
     Invoke-WebRequest -Uri ([string]$asset.browser_download_url) -Headers $headers -UseBasicParsing -OutFile $zipPath
+    $stage='verifying the release ZIP SHA-256'
     $actualHash=(Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
     if($actualHash-ne$expectedHash){throw "Release ZIP SHA-256 mismatch. Expected $expectedHash; received $actualHash."}
     Write-Host "SHA-256 verified: $actualHash" -ForegroundColor Green
+    $stage='extracting the release ZIP'
+    Write-Host 'Extracting the verified release...'
     $extractRoot=Join-Path $temporaryRoot 'Extracted';Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot
     $installer=Join-Path $extractRoot 'SqlPatchOrchestrator\Install-SqlPatchOrchestrator.ps1'
     if(-not(Test-Path $installer -PathType Leaf)){throw 'The packaged installer is missing.'}
-    $parameters=@{Destination=$Destination};if($Force){$parameters.Force=$true};& $installer @parameters
+    $stage='installing program files'
+    Write-Host "Installing program files to '$Destination' (targets, packages, and runs are preserved)..."
+    & $installer -Destination $Destination -Force
+    Write-Host ("GitHub installation completed in {0:n1} seconds." -f $timer.Elapsed.TotalSeconds) -ForegroundColor Green
+}
+catch{
+    throw "GitHub installation failed while $stage`: $($_.Exception.Message)"
 }finally{if(Test-Path $temporaryRoot){Remove-Item -LiteralPath $temporaryRoot -Recurse -Force}}

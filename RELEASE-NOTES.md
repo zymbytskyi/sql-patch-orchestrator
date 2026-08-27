@@ -1,7 +1,7 @@
-# SQL Patch Orchestrator V3.0.2
+# SQL Patch Orchestrator V3.0.3
 
-- Removes all explicit `Start-MpScan` custom scans that could block installation, preparation, or target-side Apply.
-- Does not disable Microsoft Defender, create exclusions, or change Azure/Microsoft Defender for Endpoint policy.
-- Retains GitHub release SHA-256 verification, archive manifest verification, Microsoft Authenticode validation, SQL major-version validation, and controller-to-target hash verification.
-- Aligns the target worker with the controller's standalone Enterprise edition support.
-- Includes all V3.0.1 monthly cycle, inventory gate, system backup, time-zone, and evidence fixes.
+- Automatically falls back to HTTPS when BITS is unavailable in a remote or non-interactive PowerShell session.
+- Shows GitHub installer stages and elapsed time instead of appearing to stop after SHA-256 verification.
+- Performs safe non-interactive upgrades while preserving `targets.txt`, downloaded packages, and campaign runs.
+- Retains the V3.0.2 Defender behavior: no explicit custom scan, no exclusion, and no endpoint-security policy change.
+- Retains release SHA-256, archive manifest, Microsoft Authenticode, SQL-version, standalone-safety, and controller-to-target hash validation.

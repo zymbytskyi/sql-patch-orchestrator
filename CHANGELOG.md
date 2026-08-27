@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.0.3 - 2026-08-27
+
+- Added an automatic HTTPS fallback when BITS cannot run in a remote or non-interactive PowerShell session.
+- Added visible GitHub installer stages and elapsed time, and made safe upgrades non-interactive while preserving targets, packages, and runs.
+
 ## 3.0.2 - 2026-08-27
 
 - Removed explicit blocking Microsoft Defender custom scans from GitHub installation, controller package validation, and the target worker.
