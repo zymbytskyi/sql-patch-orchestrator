@@ -177,23 +177,27 @@ function Invoke-OptionalBackups {
     $databases = Invoke-SqlQuery -ServerInstance $Instance.ServerInstance -Query "SELECT name, state_desc FROM sys.databases WHERE $filter ORDER BY database_id;"
     $pathTable = Invoke-SqlQuery -ServerInstance $Instance.ServerInstance -Query "SELECT CAST(SERVERPROPERTY('InstanceDefaultBackupPath') AS nvarchar(4000)) AS BackupPath;"
     $backupRoot = [string]$pathTable.Rows[0].BackupPath
+    if ([string]::IsNullOrWhiteSpace($backupRoot)) {
+        $pathTable = Invoke-SqlQuery -ServerInstance $Instance.ServerInstance -Query "DECLARE @BackupPath nvarchar(4000); EXEC master.dbo.xp_instance_regread N'HKEY_LOCAL_MACHINE',N'Software\Microsoft\MSSQLServer\MSSQLServer',N'BackupDirectory',@BackupPath OUTPUT; SELECT @BackupPath AS BackupPath;"
+        $backupRoot = [string]$pathTable.Rows[0].BackupPath
+    }
     if ([string]::IsNullOrWhiteSpace($backupRoot) -or -not (Test-Path -LiteralPath $backupRoot -PathType Container)) { throw "SQL default backup directory '$backupRoot' is unavailable." }
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $safeInstance = if ($Instance.InstanceName -eq 'MSSQLSERVER') { 'DEFAULT' } else { $Instance.InstanceName -replace '[^A-Za-z0-9._-]', '_' }
     $created = 0
     foreach ($row in $databases.Rows) {
         $name = [string]$row.name
-        if ([string]$row.state_desc -ne 'ONLINE') { Write-Warning "Skipping '$name' because its state is $($row.state_desc)."; continue }
+        if ([string]$row.state_desc -ne 'ONLINE') { throw "Required database '$name' is $($row.state_desc), not ONLINE." }
         $safeDatabase = $name -replace '[^A-Za-z0-9._-]', '_'
         $path = Join-Path $backupRoot ("{0}_{1}_{2}_COPY_ONLY_{3}.bak" -f $env:COMPUTERNAME, $safeInstance, $safeDatabase, $stamp)
         $sql = 'BACKUP DATABASE {0} TO DISK = {1} WITH COPY_ONLY, CHECKSUM, INIT, STATS = 10; RESTORE VERIFYONLY FROM DISK = {1} WITH CHECKSUM;' -f (Quote-SqlIdentifier $name), (Quote-SqlLiteral $path)
         Write-Host "Backing up '$name'..."
         [void](Invoke-SqlQuery -ServerInstance $Instance.ServerInstance -Query $sql -TimeoutSeconds 3600)
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Backup '$path' was not found." }
         Write-Host "Verified: $path" -ForegroundColor Green
         $created++
     }
-    if (-not $created) { throw 'No database was eligible for backup.' }
+    $expected=if($choice-eq'1'){3}else{$databases.Rows.Count}
+    if($created-ne$expected){throw "Created $created of $expected required backup(s)."}
     Write-Host "Completed and verified $created COPY_ONLY backup(s)." -ForegroundColor Green
 }
 

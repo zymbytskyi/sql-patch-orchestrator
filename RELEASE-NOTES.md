@@ -1,9 +1,9 @@
-# SQL Patch Orchestrator V3.0.0
+# SQL Patch Orchestrator V3.0.1
 
-- Remote jump-server workflow for standalone SQL Server 2017, 2019, 2022, and 2025.
-- Express, Standard, Developer, and Enterprise support.
-- Inventory and backup review, optional verified system COPY_ONLY backups.
-- Microsoft CU download or DBA-supplied media, signature/hash checks, and advance distribution.
-- Sequential apply with mandatory reboot after a successful patch.
-- Console and HTML status plus read-only post-verification.
-- Explicit safety block for WSFC, FCI, Always On, and Availability Groups.
+- Prompts for a validated monthly patch cycle at startup and allows switching cycles from menu option 8.
+- Makes menu option 2 explicitly offer verified `COPY_ONLY, CHECKSUM` backups of `master`, `model`, and `msdb` only.
+- Requires all three system databases to be ONLINE and successfully verified; `tempdb` and user databases remain excluded.
+- Uses the SQL 2017 registry fallback when `InstanceDefaultBackupPath` is unavailable.
+- Reports backup type, checksum status, and path, while calculating backup age on each target to avoid time-zone errors.
+- Prevents option 3 from downloading or distributing media while inventory is blocked and prints the exact server reasons.
+- Accepts standalone Enterprise edition while retaining the WSFC, FCI, Always On, and AG safety block.

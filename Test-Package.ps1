@@ -4,11 +4,11 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $failures=New-Object Collections.Generic.List[string]
-$required=@('Invoke-SqlPatchV3Remote.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1','Install-SqlPatchOrchestrator.ps1','Install-FromGitHub.ps1','Install.cmd','Build-Release.ps1','targets.txt','README.md','SECURITY.md','LICENSE','VERSION')
+$required=@('Invoke-SqlPatchV3Remote.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1','Install-SqlPatchOrchestrator.ps1','Install-FromGitHub.ps1','Install.cmd','Build-Release.ps1','scripts\Test-Repository.ps1','tests\Run-Tests.ps1','targets.txt','README.md','CHANGELOG.md','NEXT-STEPS.md','SECURITY.md','LICENSE','VERSION')
 foreach($name in $required){$path=Join-Path $PSScriptRoot $name;if(-not(Test-Path $path -PathType Leaf)){$failures.Add("Missing '$name'.")}}
 foreach($name in $required|Where-Object{$_-match'\.ps1$'}){$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $name),[ref]$tokens,[ref]$errors);if($errors.Count){$failures.Add("$name parse errors: $($errors.Message-join'; ')")}}
 $engine=Get-Content (Join-Path $PSScriptRoot 'Invoke-SqlPatchV3Remote.ps1') -Raw
-foreach($behavior in @('SqlPatchV2Local','Prepare','Preflight','Apply','PostVerify','forced failover','data-loss operations','FCI/Always On/AG detected')){if($engine-notmatch[regex]::Escape($behavior)){$failures.Add("Engine behavior '$behavior' is missing.")}}
+foreach($behavior in @('SqlPatchV2Local','Prepare','Preflight','Apply','PostVerify','forced failover','data-loss operations','FCI/Always On/AG detected',"SchemaVersion='1.4'",'Prepare was not started')){if($engine-notmatch[regex]::Escape($behavior)){$failures.Add("Engine behavior '$behavior' is missing.")}}
 $online=Get-Content (Join-Path $PSScriptRoot 'Install-FromGitHub.ps1') -Raw
 foreach($behavior in @('releases/latest','browser_download_url','^sha256:([A-Fa-f0-9]{64})$','Get-FileHash','Start-MpScan','Expand-Archive','Install-SqlPatchOrchestrator.ps1')){if($online-notmatch[regex]::Escape($behavior)){$failures.Add("Installer behavior '$behavior' is missing.")}}
 foreach($prohibited in @('Invoke-Expression','iex ','ConvertTo-SecureString','Get-Credential')){if($online-match[regex]::Escape($prohibited)){$failures.Add("Prohibited installer behavior '$prohibited' exists.")}}

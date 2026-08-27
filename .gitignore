@@ -20,9 +20,9 @@ Thumbs.db
 # Unpublished legacy development tree retained locally
 /config/
 /docs/
-/scripts/
+/scripts/*
+!/scripts/Test-Repository.ps1
 /src/
-/tests/
+/tests/*
+!/tests/Run-Tests.ps1
 /AGENTS.md
-/CHANGELOG.md
-/NEXT-STEPS.md
