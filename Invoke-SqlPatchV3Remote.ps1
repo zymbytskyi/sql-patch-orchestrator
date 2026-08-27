@@ -111,8 +111,8 @@ function New-TargetSession {
         if (-not $Credential) { throw 'PowerShellDirect transport requires -Credential.' }
         return New-PSSession -VMName $Server -Credential $Credential
     }
-    if ($Credential) { return New-PSSession -ComputerName $Server -Credential $Credential }
-    New-PSSession -ComputerName $Server
+    if ($Credential) { return New-PSSession -ComputerName $Server -Authentication Negotiate -Credential $Credential }
+    New-PSSession -ComputerName $Server -Authentication Negotiate
 }
 function Save-State {
     param($State)

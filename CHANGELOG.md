@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.7 - 2026-08-27
+
+- Replaced the alternate-credential prompt with automatic controller-side `WinRM TrustedHosts = *` configuration after an inventory `Access is denied` result.
+- Retries inventory with the same current Windows account; no password prompt or credential storage is used.
+- Uses explicit WinRM `Negotiate` authentication so Windows can select Kerberos or NTLM according to the controller and target configuration.
+
 ## 3.0.6 - 2026-08-27
 
 - Added an interactive credential retry when WinRM reaches a target but returns `Access is denied` during inventory.
