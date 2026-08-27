@@ -15,18 +15,34 @@ if([string]::IsNullOrWhiteSpace($RunRoot)){$RunRoot=Join-Path $PSScriptRoot 'Run
 $engine=Join-Path $PSScriptRoot 'Invoke-SqlPatchV3Remote.ps1'
 $targets=Join-Path $PSScriptRoot 'targets.txt'
 function Pause-Menu{[void](Read-Host 'Press Enter to return to the menu')}
+function ConvertTo-PatchCycle{
+    param([string]$Value)
+    $english=[Globalization.CultureInfo]::GetCultureInfo('en-US')
+    $candidate=$Value.Trim()
+    if($candidate-match'^(?<year>\d{4})-(?<month>0[1-9]|1[0-2])$'){
+        return ([datetime]::new([int]$matches.year,[int]$matches.month,1)).ToString('MMMMyyyy',$english)
+    }
+    $parsed=[datetime]::MinValue
+    foreach($culture in @($english)+[Globalization.CultureInfo]::GetCultures([Globalization.CultureTypes]::SpecificCultures)){
+        foreach($format in 'MMMMyyyy','MMMM yyyy','MMMM-yyyy'){
+            if([datetime]::TryParseExact($candidate,$format,$culture,[Globalization.DateTimeStyles]::AllowWhiteSpaces,[ref]$parsed)){
+                return $parsed.ToString('MMMMyyyy',$english)
+            }
+        }
+    }
+    throw 'Patch cycle is invalid. Use YYYY-MM, for example 2026-09, or press Enter for the current month.'
+}
 function Select-PatchCycle{
     param([string]$RequestedCycle)
     $culture=[Globalization.CultureInfo]::GetCultureInfo('en-US')
-    $suggested=(Get-Date).ToString('MMMMyyyy',$culture)
+    $suggested=(Get-Date).ToString('yyyy-MM',$culture)
     if([string]::IsNullOrWhiteSpace($RequestedCycle)){
         $existing=@(Get-ChildItem -LiteralPath $RunRoot -Directory -ErrorAction SilentlyContinue|Where-Object{$_.Name-match'^[A-Za-z]+\d{4}$'}|Sort-Object LastWriteTime -Descending|Select-Object -ExpandProperty Name)
         if($existing.Count){Write-Host ('Existing cycles: '+($existing-join', ')) -ForegroundColor DarkGray}
-        $RequestedCycle=Read-Host "Patch cycle [$suggested]"
+        $RequestedCycle=Read-Host "Patch cycle [$suggested; Enter=current]"
         if([string]::IsNullOrWhiteSpace($RequestedCycle)){$RequestedCycle=$suggested}
     }
-    try{$date=[datetime]::ParseExact($RequestedCycle,'MMMMyyyy',$culture,[Globalization.DateTimeStyles]::None)}catch{throw "Patch cycle must use an English month and year, for example September2026."}
-    return $date.ToString('MMMMyyyy',$culture)
+    return ConvertTo-PatchCycle $RequestedCycle
 }
 function Get-CycleState{
     $path=Join-Path (Join-Path $RunRoot $Cycle) 'state.json'

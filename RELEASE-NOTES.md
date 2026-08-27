@@ -1,7 +1,7 @@
-# SQL Patch Orchestrator V3.0.3
+# SQL Patch Orchestrator V3.0.4
 
-- Automatically falls back to HTTPS when BITS is unavailable in a remote or non-interactive PowerShell session.
-- Shows GitHub installer stages and elapsed time instead of appearing to stop after SHA-256 verification.
-- Performs safe non-interactive upgrades while preserving `targets.txt`, downloaded packages, and campaign runs.
-- Retains the V3.0.2 Defender behavior: no explicit custom scan, no exclusion, and no endpoint-security policy change.
-- Retains release SHA-256, archive manifest, Microsoft Authenticode, SQL-version, standalone-safety, and controller-to-target hash validation.
+- Accepts the language-neutral `YYYY-MM` cycle format and uses the current month when the operator presses Enter.
+- Accepts localized full month names and existing English `MonthYYYY` input, then normalizes the run directory safely.
+- Removes the startup error that required an English month name.
+- Includes the V3.0.3 BITS-to-HTTPS fallback and observable, non-interactive GitHub upgrade.
+- Retains all media, standalone-safety, backup, hash, signature, and endpoint-security boundaries.

@@ -8,17 +8,17 @@ Run Windows PowerShell as Administrator:
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-$p=Join-Path $env:TEMP 'Install-SqlPatchOrchestrator-3.0.3.ps1'
-Invoke-WebRequest 'https://raw.githubusercontent.com/zymbytskyi/sql-patch-orchestrator/v3.0.3/Install-FromGitHub.ps1' -UseBasicParsing -OutFile $p
+$p=Join-Path $env:TEMP 'Install-SqlPatchOrchestrator-3.0.4.ps1'
+Invoke-WebRequest 'https://raw.githubusercontent.com/zymbytskyi/sql-patch-orchestrator/v3.0.4/Install-FromGitHub.ps1' -UseBasicParsing -OutFile $p
 if((Get-FileHash $p -Algorithm SHA256).Hash-ne'861FCCA3DF6808366C90ED3A78D1F6642B83DC7A80B1A4B939DB3160ABF5156F'){throw 'Bootstrap SHA-256 mismatch.'}
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p -Version 3.0.3
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p -Version 3.0.4
 ```
 
-The installer verifies the GitHub release SHA-256 digest and installs to `C:\SqlPatchOrchestrator`. V3.0.3 does not start a blocking Microsoft Defender custom scan. It does not disable Defender, create exclusions, or change endpoint security policy. Existing targets, packages, and runs are preserved during a non-interactive upgrade.
+The installer verifies the GitHub release SHA-256 digest and installs to `C:\SqlPatchOrchestrator`. V3.0.4 does not start a blocking Microsoft Defender custom scan. It does not disable Defender, create exclusions, or change endpoint security policy. Existing targets, packages, and runs are preserved during a non-interactive upgrade.
 
 ## Install from ZIP
 
-Download `SqlPatchOrchestrator-v3.0.3.zip` from [Releases](https://github.com/zymbytskyi/sql-patch-orchestrator/releases/tag/v3.0.3), extract it to `C:\`, then run `C:\SqlPatchOrchestrator\Install.cmd` as administrator. The archive already contains the correct top-level folder.
+Download `SqlPatchOrchestrator-v3.0.4.zip` from [Releases](https://github.com/zymbytskyi/sql-patch-orchestrator/releases/tag/v3.0.4), extract it to `C:\`, then run `C:\SqlPatchOrchestrator\Install.cmd` as administrator. The archive already contains the correct top-level folder.
 
 ## Use
 
@@ -29,7 +29,7 @@ cd C:\SqlPatchOrchestrator
 .\Start-SqlPatchV3Menu.ps1
 ```
 
-At startup, enter the monthly patch cycle in `MonthYYYY` format, such as `September2026`. Press Enter to use the current month. Each cycle has separate state and dashboard data under `Runs`.
+At startup, enter the monthly patch cycle in language-neutral `YYYY-MM` format, such as `2026-09`, or press Enter to use the current month. Existing English `MonthYYYY` names and localized full month names are also accepted and normalized safely. Each cycle has separate state and dashboard data under `Runs`.
 
 Menu workflow:
 

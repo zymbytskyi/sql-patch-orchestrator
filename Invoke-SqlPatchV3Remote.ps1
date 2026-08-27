@@ -32,8 +32,23 @@ if([string]::IsNullOrWhiteSpace($TargetListPath)){$TargetListPath=Join-Path $PSS
 if([string]::IsNullOrWhiteSpace($PackageRoot)){$PackageRoot=Join-Path $PSScriptRoot 'Packages'}
 if([string]::IsNullOrWhiteSpace($RunRoot)){$RunRoot=Join-Path $PSScriptRoot 'Runs'}
 $cycleCulture=[Globalization.CultureInfo]::GetCultureInfo('en-US')
-try{$cycleDate=[datetime]::ParseExact($Cycle,'MMMMyyyy',$cycleCulture,[Globalization.DateTimeStyles]::None)}catch{throw "Patch cycle must use an English month and year, for example September2026."}
-$Cycle=$cycleDate.ToString('MMMMyyyy',$cycleCulture)
+function ConvertTo-PatchCycle{
+    param([string]$Value)
+    $candidate=$Value.Trim()
+    if($candidate-match'^(?<year>\d{4})-(?<month>0[1-9]|1[0-2])$'){
+        return ([datetime]::new([int]$matches.year,[int]$matches.month,1)).ToString('MMMMyyyy',$cycleCulture)
+    }
+    $parsed=[datetime]::MinValue
+    foreach($culture in @($cycleCulture)+[Globalization.CultureInfo]::GetCultures([Globalization.CultureTypes]::SpecificCultures)){
+        foreach($format in 'MMMMyyyy','MMMM yyyy','MMMM-yyyy'){
+            if([datetime]::TryParseExact($candidate,$format,$culture,[Globalization.DateTimeStyles]::AllowWhiteSpaces,[ref]$parsed)){
+                return $parsed.ToString('MMMMyyyy',$cycleCulture)
+            }
+        }
+    }
+    throw 'Patch cycle is invalid. Use YYYY-MM, for example 2026-09, or press Enter for the current month.'
+}
+$Cycle=ConvertTo-PatchCycle $Cycle
 if([string]::IsNullOrWhiteSpace($V2SourcePath)){
     $packagedV2=Join-Path $PSScriptRoot 'SqlPatchV2Local'
     $labV2=Join-Path $PSScriptRoot '..\SqlPatchV2Local'

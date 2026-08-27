@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.0.4 - 2026-08-27
+
+- Removed the English-language requirement from patch-cycle input.
+- Added language-neutral `YYYY-MM`, Enter-for-current-month, and localized full-month-name input while retaining existing `MonthYYYY` compatibility and normalized safe run-directory names.
+
 ## 3.0.3 - 2026-08-27
 
 - Added an automatic HTTPS fallback when BITS cannot run in a remote or non-interactive PowerShell session.
