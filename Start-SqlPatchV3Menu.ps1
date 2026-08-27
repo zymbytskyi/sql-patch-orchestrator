@@ -15,38 +15,27 @@ if([string]::IsNullOrWhiteSpace($RunRoot)){$RunRoot=Join-Path $PSScriptRoot 'Run
 $engine=Join-Path $PSScriptRoot 'Invoke-SqlPatchV3Remote.ps1'
 $targets=Join-Path $PSScriptRoot 'targets.txt'
 function Pause-Menu{[void](Read-Host 'Press Enter to return to the menu')}
-function ConvertTo-PatchCycle{
+function Get-CycleStorageKey{
     param([string]$Value)
-    $english=[Globalization.CultureInfo]::GetCultureInfo('en-US')
-    $candidate=$Value.Trim()
-    if($candidate-match'^(?<year>\d{4})-(?<month>0[1-9]|1[0-2])$'){
-        return ([datetime]::new([int]$matches.year,[int]$matches.month,1)).ToString('MMMMyyyy',$english)
-    }
-    $parsed=[datetime]::MinValue
-    foreach($culture in @($english)+[Globalization.CultureInfo]::GetCultures([Globalization.CultureTypes]::SpecificCultures)){
-        foreach($format in 'MMMMyyyy','MMMM yyyy','MMMM-yyyy'){
-            if([datetime]::TryParseExact($candidate,$format,$culture,[Globalization.DateTimeStyles]::AllowWhiteSpaces,[ref]$parsed)){
-                return $parsed.ToString('MMMMyyyy',$english)
-            }
-        }
-    }
-    throw 'Patch cycle is invalid. Use YYYY-MM, for example 2026-09, or press Enter for the current month.'
+    if($Value-match'^[A-Za-z]+\d{4}$'){return $Value}
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{$hash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value.ToLowerInvariant())))).Replace('-','')}finally{$sha.Dispose()}
+    'Cycle-'+$hash.Substring(0,16)
 }
 function Select-PatchCycle{
     param([string]$RequestedCycle)
-    $culture=[Globalization.CultureInfo]::GetCultureInfo('en-US')
-    $suggested=(Get-Date).ToString('yyyy-MM',$culture)
+    $suggested=(Get-Date).ToString('yyyy-MM',[Globalization.CultureInfo]::InvariantCulture)
     if([string]::IsNullOrWhiteSpace($RequestedCycle)){
-        $existing=@(Get-ChildItem -LiteralPath $RunRoot -Directory -ErrorAction SilentlyContinue|Where-Object{$_.Name-match'^[A-Za-z]+\d{4}$'}|Sort-Object LastWriteTime -Descending|Select-Object -ExpandProperty Name)
+        $existing=@(Get-ChildItem -LiteralPath $RunRoot -Directory -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending|ForEach-Object{$stateFile=Join-Path $_.FullName 'state.json';if(Test-Path -LiteralPath $stateFile -PathType Leaf){try{[string](Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8|ConvertFrom-Json).Cycle}catch{[string]$_.Name}}else{[string]$_.Name}}|Where-Object{$_}|Select-Object -Unique)
         if($existing.Count){Write-Host ('Existing cycles: '+($existing-join', ')) -ForegroundColor DarkGray}
-        $RequestedCycle=Read-Host "Patch cycle [$suggested; Enter=current]"
+        $RequestedCycle=Read-Host "Cycle name [$suggested]"
         if([string]::IsNullOrWhiteSpace($RequestedCycle)){$RequestedCycle=$suggested}
     }
-    return ConvertTo-PatchCycle $RequestedCycle
+    $RequestedCycle.Trim()
 }
 function Get-CycleState{
-    $path=Join-Path (Join-Path $RunRoot $Cycle) 'state.json'
-    if(Test-Path -LiteralPath $path -PathType Leaf){return (Get-Content -LiteralPath $path -Raw|ConvertFrom-Json)}
+    $path=Join-Path (Join-Path $RunRoot (Get-CycleStorageKey $Cycle)) 'state.json'
+    if(Test-Path -LiteralPath $path -PathType Leaf){return (Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json)}
     return $null
 }
 function Show-InventoryBlockers{
@@ -85,8 +74,8 @@ try{while($true){
                 $inventoryCode=$LASTEXITCODE
                 Write-Host "Inventory exit code: $inventoryCode"
                 if($inventoryCode-eq0){
-                    $statePath=Join-Path (Join-Path $RunRoot $Cycle) 'state.json'
-                    $inventoryState=Get-Content -LiteralPath $statePath -Raw|ConvertFrom-Json
+                    $statePath=Join-Path (Join-Path $RunRoot (Get-CycleStorageKey $Cycle)) 'state.json'
+                    $inventoryState=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
                     $warningCount=@($inventoryState.Servers|ForEach-Object Instances|ForEach-Object BackupWarnings).Count
                     Write-Host "Backup warnings: $warningCount" -ForegroundColor $(if($warningCount){'Yellow'}else{'Green'})
                     Write-Host 'System backup action:' -ForegroundColor Cyan
@@ -122,7 +111,7 @@ try{while($true){
                 & $engine -Mode Apply @common -ConfirmApply -BackupChoice $backup;Write-Host "Exit code: $LASTEXITCODE";Pause-Menu
             }
             '6'{& $engine -Mode PostVerify @common;Write-Host "Exit code: $LASTEXITCODE";Pause-Menu}
-            '7'{& $engine -Mode Dashboard @common;$path=Join-Path (Join-Path $RunRoot $Cycle) 'Dashboard.html';if(Test-Path $path){Start-Process $path};Pause-Menu}
+            '7'{& $engine -Mode Dashboard @common;$path=Join-Path (Join-Path $RunRoot (Get-CycleStorageKey $Cycle)) 'Dashboard.html';if(Test-Path $path){Start-Process $path};Pause-Menu}
             '8'{$Cycle=Select-PatchCycle ''; $common.Cycle=$Cycle;Write-Host "Active cycle: $Cycle" -ForegroundColor Green;Pause-Menu}
             '0'{return}
             default{Write-Host 'Select 0-8.' -ForegroundColor Yellow;Pause-Menu}

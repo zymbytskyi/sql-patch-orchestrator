@@ -13,7 +13,7 @@ param(
     [Alias('ServerListPath')][string]$TargetListPath,
     [string]$PackageRoot,
     [string]$RunRoot,
-    [string]$Cycle = (Get-Date).ToString('MMMMyyyy',[Globalization.CultureInfo]::GetCultureInfo('en-US')),
+    [string]$Cycle = (Get-Date).ToString('yyyy-MM',[Globalization.CultureInfo]::InvariantCulture),
     [ValidateSet('WinRM','PowerShellDirect')][string]$Transport = 'WinRM',
     [pscredential]$Credential,
     [switch]$ApproveScope,
@@ -31,24 +31,14 @@ $ErrorActionPreference = 'Stop'
 if([string]::IsNullOrWhiteSpace($TargetListPath)){$TargetListPath=Join-Path $PSScriptRoot 'targets.txt'}
 if([string]::IsNullOrWhiteSpace($PackageRoot)){$PackageRoot=Join-Path $PSScriptRoot 'Packages'}
 if([string]::IsNullOrWhiteSpace($RunRoot)){$RunRoot=Join-Path $PSScriptRoot 'Runs'}
-$cycleCulture=[Globalization.CultureInfo]::GetCultureInfo('en-US')
-function ConvertTo-PatchCycle{
+if([string]::IsNullOrWhiteSpace($Cycle)){$Cycle=(Get-Date).ToString('yyyy-MM',[Globalization.CultureInfo]::InvariantCulture)}else{$Cycle=$Cycle.Trim()}
+function Get-CycleStorageKey{
     param([string]$Value)
-    $candidate=$Value.Trim()
-    if($candidate-match'^(?<year>\d{4})-(?<month>0[1-9]|1[0-2])$'){
-        return ([datetime]::new([int]$matches.year,[int]$matches.month,1)).ToString('MMMMyyyy',$cycleCulture)
-    }
-    $parsed=[datetime]::MinValue
-    foreach($culture in @($cycleCulture)+[Globalization.CultureInfo]::GetCultures([Globalization.CultureTypes]::SpecificCultures)){
-        foreach($format in 'MMMMyyyy','MMMM yyyy','MMMM-yyyy'){
-            if([datetime]::TryParseExact($candidate,$format,$culture,[Globalization.DateTimeStyles]::AllowWhiteSpaces,[ref]$parsed)){
-                return $parsed.ToString('MMMMyyyy',$cycleCulture)
-            }
-        }
-    }
-    throw 'Patch cycle is invalid. Use YYYY-MM, for example 2026-09, or press Enter for the current month.'
+    if($Value-match'^[A-Za-z]+\d{4}$'){return $Value}
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{$hash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value.ToLowerInvariant())))).Replace('-','')}finally{$sha.Dispose()}
+    'Cycle-'+$hash.Substring(0,16)
 }
-$Cycle=ConvertTo-PatchCycle $Cycle
 if([string]::IsNullOrWhiteSpace($V2SourcePath)){
     $packagedV2=Join-Path $PSScriptRoot 'SqlPatchV2Local'
     $labV2=Join-Path $PSScriptRoot '..\SqlPatchV2Local'
@@ -57,7 +47,7 @@ if([string]::IsNullOrWhiteSpace($V2SourcePath)){
 $supported = @{14='2017';15='2019';16='2022';17='2025'}
 $downloadPages = @{14='https://www.microsoft.com/en-us/download/details.aspx?id=56128';15='https://www.microsoft.com/en-us/download/details.aspx?id=100809';16='https://www.microsoft.com/en-us/download/details.aspx?id=105013';17='https://www.microsoft.com/en-us/download/details.aspx?id=108540'}
 $buildHistoryPages = @{14='https://learn.microsoft.com/en-us/troubleshoot/sql/releases/sqlserver-2017/build-versions';15='https://learn.microsoft.com/en-us/troubleshoot/sql/releases/sqlserver-2019/build-versions';16='https://learn.microsoft.com/en-us/troubleshoot/sql/releases/sqlserver-2022/build-versions';17='https://learn.microsoft.com/en-us/troubleshoot/sql/releases/sqlserver-2025/build-versions'}
-$cycleRoot = Join-Path $RunRoot $Cycle
+$cycleRoot = Join-Path $RunRoot (Get-CycleStorageKey $Cycle)
 $statePath = Join-Path $cycleRoot 'state.json'
 $dashboardPath = Join-Path $cycleRoot 'Dashboard.html'
 
@@ -89,7 +79,7 @@ function Get-BackupWarnings {
 }
 function Get-Scope {
     if (-not (Test-Path -LiteralPath $TargetListPath -PathType Leaf)) { throw "Target list '$TargetListPath' was not found." }
-    $lines = @(Get-Content -LiteralPath $TargetListPath | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
+    $lines = @(Get-Content -LiteralPath $TargetListPath -Encoding UTF8 | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
     if (-not $lines.Count) { throw 'The DBA target list is empty.' }
     $uniqueLines = @($lines | Sort-Object -Unique)
     if ($uniqueLines.Count -ne $lines.Count) { throw 'The target list contains duplicate entries.' }
@@ -127,6 +117,7 @@ function New-TargetSession {
 function Save-State {
     param($State)
     if (-not (Test-Path $cycleRoot)) { New-Item -ItemType Directory -Path $cycleRoot -Force | Out-Null }
+    [IO.File]::WriteAllText((Join-Path $cycleRoot 'cycle-name.txt'),[string]$State.Cycle,[Text.UTF8Encoding]::new($false))
     $State.UpdatedUtc = [datetime]::UtcNow.ToString('o')
     $json = $State | ConvertTo-Json -Depth 10
     $uniqueId=[guid]::NewGuid().ToString('N')
@@ -142,7 +133,7 @@ function Save-State {
 }
 function Read-State {
     if (-not (Test-Path $statePath -PathType Leaf)) { throw "State '$statePath' does not exist. Run Inventory first." }
-    Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 function Write-Dashboard {
     param($State)
@@ -309,7 +300,7 @@ function Get-PackageReleaseMetadata {
     $cachePath=Join-Path $PackageRoot 'package-metadata.json';$cached=@()
     if(Test-Path -LiteralPath $cachePath -PathType Leaf){
         try{
-            $document=Get-Content -LiteralPath $cachePath -Raw|ConvertFrom-Json;$pending=New-Object Collections.Queue
+            $document=Get-Content -LiteralPath $cachePath -Raw -Encoding UTF8|ConvertFrom-Json;$pending=New-Object Collections.Queue
             foreach($item in @($document)){$pending.Enqueue($item)}
             while($pending.Count){$item=$pending.Dequeue();if($item.PSObject.Properties.Name-contains'FileName'){$cached+=,$item}elseif($item.PSObject.Properties.Name-contains'value'){foreach($nested in @($item.value)){$pending.Enqueue($nested)}}}
         }catch{Write-Warning "Ignoring invalid package metadata cache '$cachePath'.";$cached=@()}

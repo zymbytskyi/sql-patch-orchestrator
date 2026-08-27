@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0.5 - 2026-08-27
+
+- Removed all cycle-name format and language requirements; the DBA can use any descriptive label for production, emergency, test, or other work.
+- Separated the exact display label from a deterministic SHA-256-derived storage key so arbitrary names remain safe filesystem inputs.
+- Preserved legacy `MonthYYYY` run-directory compatibility and added `cycle-name.txt` beside runtime state for easy identification.
+- Added explicit UTF-8 reads for state, metadata, targets, and cycle labels so non-ASCII names remain intact on Windows PowerShell 5.1.
+
 ## 3.0.4 - 2026-08-27
 
 - Removed the English-language requirement from patch-cycle input.

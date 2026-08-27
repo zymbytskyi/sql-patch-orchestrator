@@ -8,7 +8,8 @@ $required=@('Invoke-SqlPatchV3Remote.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2
 foreach($name in $required){$path=Join-Path $PSScriptRoot $name;if(-not(Test-Path $path -PathType Leaf)){$failures.Add("Missing '$name'.")}}
 foreach($name in $required|Where-Object{$_-match'\.ps1$'}){$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $name),[ref]$tokens,[ref]$errors);if($errors.Count){$failures.Add("$name parse errors: $($errors.Message-join'; ')")}}
 $engine=Get-Content (Join-Path $PSScriptRoot 'Invoke-SqlPatchV3Remote.ps1') -Raw
-foreach($behavior in @('SqlPatchV2Local','Prepare','Preflight','Apply','PostVerify','forced failover','data-loss operations','FCI/Always On/AG detected',"SchemaVersion='1.4'",'Prepare was not started')){if($engine-notmatch[regex]::Escape($behavior)){$failures.Add("Engine behavior '$behavior' is missing.")}}
+foreach($behavior in @('SqlPatchV2Local','Prepare','Preflight','Apply','PostVerify','forced failover','data-loss operations','FCI/Always On/AG detected',"SchemaVersion='1.4'",'Prepare was not started','Get-CycleStorageKey','cycle-name.txt')){if($engine-notmatch[regex]::Escape($behavior)){$failures.Add("Engine behavior '$behavior' is missing.")}}
+if($engine-match[regex]::Escape('Join-Path $RunRoot $Cycle')){$failures.Add('Free-form cycle label is used directly as a filesystem path.')}
 $online=Get-Content (Join-Path $PSScriptRoot 'Install-FromGitHub.ps1') -Raw
 foreach($behavior in @('releases/latest','browser_download_url','^sha256:([A-Fa-f0-9]{64})$','Get-FileHash','Expand-Archive','Install-SqlPatchOrchestrator.ps1')){if($online-notmatch[regex]::Escape($behavior)){$failures.Add("Installer behavior '$behavior' is missing.")}}
 foreach($prohibited in @('Invoke-Expression','iex ','ConvertTo-SecureString','Get-Credential','Start-MpScan')){if($online-match[regex]::Escape($prohibited)){$failures.Add("Prohibited installer behavior '$prohibited' exists.")}}
