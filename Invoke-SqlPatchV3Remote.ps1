@@ -3,7 +3,7 @@
 Remote standalone SQL patch orchestration with live console and HTML status.
 
 .DESCRIPTION
-Processes one server at a time. Domain discovery, parallel patching, clustered
+Processes standalone servers with bounded preparation and Apply concurrency. Domain discovery, clustered
 SQL, Always On, forced failover, and data-loss operations are outside scope.
 #>
 #Requires -Version 5.1
@@ -24,7 +24,15 @@ param(
     [string]$V2SourcePath,
     [int]$ReadyTimeoutSeconds = 1200,
     [ValidateRange(1,365)][int]$BackupWarningDays = 7,
-    [long]$MinimumTargetFreeBytes = 3GB
+    [long]$MinimumTargetFreeBytes = 3GB,
+    [ValidateSet('SMB','PowerShell')][string]$CopyMethod='SMB',
+    [ValidateRange(1,8)][int]$CopyConcurrency = 3,
+    [ValidateRange(1,4)][int]$ApplyConcurrency = 2,
+    [ValidateRange(1,1024)][int]$CopyLimitMBps = 20,
+    [ValidateRange(10,95)][int]$ControllerCpuLimit = 75,
+    [ValidateRange(1,1024)][double]$MinimumControllerFreeGB = 2,
+    [ValidateRange(5,3600)][int]$ControllerWaitSeconds = 300,
+    [string]$WorkerTarget
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -107,7 +115,11 @@ function Get-ScopeHash {
 function Add-TargetTrustedHost {
     param([string]$Server)
     $path='WSMan:\localhost\Client\TrustedHosts'
+    $trustMutex=New-Object Threading.Mutex($false,'Local\SqlPatchTrustedHosts')
+    $trustHeld=$false
     try {
+        try{$trustHeld=$trustMutex.WaitOne(30000)}catch [Threading.AbandonedMutexException]{$trustHeld=$true}
+        if(-not$trustHeld){throw 'Another controller trust update is still in progress.'}
         $item=Get-Item -Path $path -ErrorAction Stop
         $previous=[string]$item.Value
         $entries=@($previous -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -125,6 +137,7 @@ function Add-TargetTrustedHost {
         if(-not @($effective -split ',' | Where-Object { $Server -like $_.Trim() }).Count){throw 'The effective TrustedHosts setting does not include the target; check Group Policy.'}
         Write-Host "WinRM: added '$Server' to controller TrustedHosts; existing entries preserved." -ForegroundColor Yellow
     }catch{throw "WinRM client configuration for '$Server' failed. Run Windows PowerShell as Administrator; check controller Group Policy. $($_.Exception.Message)"}
+    finally{if($trustHeld){$trustMutex.ReleaseMutex()};$trustMutex.Dispose()}
 }
 function New-TargetSession {
     param([string]$Server)
@@ -161,11 +174,11 @@ function Save-State {
     $legacyTemp=$statePath+'.tmp';if(Test-Path -LiteralPath $legacyTemp -PathType Leaf){Remove-Item -LiteralPath $legacyTemp -Force -ErrorAction SilentlyContinue}
     try {
         [IO.File]::WriteAllText($temp,$json,[Text.UTF8Encoding]::new($false))
-        [IO.File]::Copy($temp,$statePath,$true)
+        if(Test-Path -LiteralPath $statePath){[IO.File]::Replace($temp,$statePath,[NullString]::Value)}else{[IO.File]::Move($temp,$statePath)}
     }
     finally{if(Test-Path -LiteralPath $temp -PathType Leaf){Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue}}
     Write-Dashboard -State $State
-    Show-Console -State $State
+    if($Mode-ne'Preflight'){Show-Console -State $State}
 }
 function Read-State {
     if (-not (Test-Path $statePath -PathType Leaf)) { throw "State '$statePath' does not exist. Run Inventory first." }
@@ -190,17 +203,18 @@ function Write-Dashboard {
             $packageName=Get-PropertyValue $instance 'PackageName' 'Not selected'
             $distributionState=Get-PropertyValue $instance 'DistributionState' 'Not staged'
             $packageState=Get-PropertyValue $instance 'PackageState' 'Not verified'
-            $packageClass=if($packageState-in@('Staged','Signature + SHA-256 verified','Installed')){'ok'}else{'warn'}
+            $packageClass=if((Get-PropertyValue $instance 'PackageHashVerified' '')-eq'Yes'-and$packageState-in@('Staged','Signature + SHA-256 verified','Installed')){'ok'}else{'warn'}
             $releaseDate=Format-ReleaseDate (Get-PropertyValue $instance 'ReleaseDate' 'Unknown');$packageAge=if($releaseDate-ne'Unknown'){[math]::Max(0,[int](([datetime]::UtcNow.Date-[datetime]$releaseDate).TotalDays))}else{'Unknown'}
             $hostText="Free C: $((Encode-Html (Get-PropertyValue $server 'FreeGiB' 'Not checked'))) GiB<br>Pending reboot: $((Encode-Html (Get-PropertyValue $server 'PendingReboot' 'Not checked')))<br>Partial files: $((Encode-Html (Get-PropertyValue $server 'PartialFiles' 'Not checked')))"
+            $hostText+="<br><b>Readiness check: $((Encode-Html (Get-PropertyValue $server 'PreflightStatus' 'Not checked')))</b><br>$((Encode-Html (Get-PropertyValue $server 'PreflightDetails' '')))"
             $timeText="$((Encode-Html (Get-PropertyValue $server 'TimeZone' 'Unknown timezone'))) $((Encode-Html (Get-PropertyValue $server 'UtcOffset' '')))"
             $postStatus=Get-PropertyValue $instance 'PostVerifyStatus' 'Not run';$postClass=if($postStatus-eq'Passed'){'ok'}elseif($postStatus-eq'Failed'){'bad'}else{'warn'}
             $postText="DB: $((Encode-Html (Get-PropertyValue $instance 'DatabaseSummary' 'Not checked')))<br>Engine: $((Encode-Html (Get-PropertyValue $instance 'EngineServiceSummary' 'Not checked')))<br>SQL auto services: $((Encode-Html (Get-PropertyValue $server 'SqlServiceSummary' 'Not checked')))<br><span class=`"muted`">$((Encode-Html (Get-PropertyValue $server 'PostVerifyWarnings' '')))</span>"
-            '<tr><td><b>{0}</b><br><span class="muted">{1}</span></td><td class="{2}"><b>{3}</b><br><span class="muted">SQL: {4}; standalone: {5}; sysadmin: {6}</span></td><td>{7}<br><span class="muted">{8}</span></td><td>{9}<br><span class="muted">target: {10}</span></td><td class="{11}"><b>copy: {12}</b><br>verify: {13}<br><span class="muted">{14}; hash match: {15}</span><br><b>released: {16}</b><br><span class="muted">{17}; age: {18} day(s)</span></td><td class="{19}">{20}{21}</td><td>{22}</td><td>{23}<br><span class="muted">{24}</span></td><td class="{25}"><b>{26}</b><br>{27}</td><td class="{28}"><b>{29}</b><br><span class="muted">{30}</span></td></tr>' -f (Encode-Html $fullName),$timeText,$readinessClass,(Encode-Html $readiness),(Encode-Html (Get-PropertyValue $instance 'SqlReady' 'Unknown')),(Encode-Html (Get-PropertyValue $instance 'Standalone' 'Unknown')),(Encode-Html (Get-PropertyValue $instance 'Sysadmin' 'Unknown')),(Encode-Html $instance.Edition),(Encode-Html $instance.UpdateLevel),(Encode-Html $instance.Version),(Encode-Html $instance.TargetVersion),$packageClass,(Encode-Html $distributionState),(Encode-Html $packageState),(Encode-Html $packageName),(Encode-Html (Get-PropertyValue $instance 'PackageHashVerified' 'Not checked')),(Encode-Html $releaseDate),(Encode-Html (Get-PropertyValue $instance 'UpdateName' 'Not selected')),(Encode-Html $packageAge),$backupClass,$systemBackups,$(if($warnings.Count){"<br><span class=`"warn`">$((Encode-Html ($warnings-join'; ')))</span>"}),$userBackups,$hostText,(Encode-Html (Get-PropertyValue $server 'LastChangeUtc' $State.UpdatedUtc)),$postClass,(Encode-Html $postStatus),$postText,(Encode-Html $server.Status),(Encode-Html $server.Status),(Encode-Html $server.Message)
+            '<tr><td><b>{0}</b><br><span class="muted">{1}</span></td><td class="{2}"><b>{3}</b><br><span class="muted">SQL: {4}; standalone: {5}; sysadmin: {6}</span></td><td>{7}<br><span class="muted">{8}</span></td><td>{9}<br><span class="muted">target: {10}</span></td><td class="{11}"><b>copy: {12}</b><br>Folder: {31}<br>File: {32}<br>Transport: {33}<br>Verified UTC: {34}<br>SHA-256: {35}<br>verify: {13}<br><span class="muted">{14}; hash match: {15}</span><br><b>released: {16}</b><br><span class="muted">{17}; age: {18} day(s)</span></td><td class="{19}">{20}{21}</td><td>{22}</td><td>{23}<br><span class="muted">{24}</span></td><td class="{25}"><b>{26}</b><br>{27}</td><td class="{28}"><b>{29}</b><br><span class="muted">{30}</span></td></tr>' -f (Encode-Html $fullName),$timeText,$readinessClass,(Encode-Html $readiness),(Encode-Html (Get-PropertyValue $instance 'SqlReady' 'Unknown')),(Encode-Html (Get-PropertyValue $instance 'Standalone' 'Unknown')),(Encode-Html (Get-PropertyValue $instance 'Sysadmin' 'Unknown')),(Encode-Html $instance.Edition),(Encode-Html $instance.UpdateLevel),(Encode-Html $instance.Version),(Encode-Html $instance.TargetVersion),$packageClass,(Encode-Html $distributionState),(Encode-Html $packageState),(Encode-Html $packageName),(Encode-Html (Get-PropertyValue $instance 'PackageHashVerified' 'Not checked')),(Encode-Html $releaseDate),(Encode-Html (Get-PropertyValue $instance 'UpdateName' 'Not selected')),(Encode-Html $packageAge),$backupClass,$systemBackups,$(if($warnings.Count){"<br><span class=`"warn`">$((Encode-Html ($warnings-join'; ')))</span>"}),$userBackups,$hostText,(Encode-Html (Get-PropertyValue $server 'LastChangeUtc' $State.UpdatedUtc)),$postClass,(Encode-Html $postStatus),$postText,(Encode-Html $server.Status),(Encode-Html $server.Status),(Encode-Html $server.Message),(Encode-Html $(if(Get-PropertyValue $instance 'RemotePackagePath' ''){Split-Path $instance.RemotePackagePath -Parent}else{'Not staged'})),(Encode-Html (Get-PropertyValue $instance 'RemotePackagePath' 'Not staged')),(Encode-Html (Get-PropertyValue $instance 'CopyMethod' 'Not recorded')),(Encode-Html (Get-PropertyValue $instance 'PackageVerifiedUtc' 'Not checked')),(Encode-Html (Get-PropertyValue $instance 'PackageSha256' 'Not recorded'))
         }
     }
     $html = @"
-<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5"><title>SQL Patch $((Encode-Html $State.Cycle))</title><style>body{font-family:Segoe UI,Arial;margin:20px;background:#10151d;color:#edf2f7}h1{margin-bottom:4px}.summary{margin-top:0;color:#9fb0c3}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:1700px;font-size:13px}th{position:sticky;top:0;background:#1a2230;color:#bcd0e5}th,td{padding:9px;border:1px solid #354052;text-align:left;vertical-align:top}.ok,.Complete,.Prepared,.Ready,.PreflightReady,.PostVerified{color:#6ee7a8}.bad,.Failed,.Blocked,.PostVerifyFailed{color:#ff8080}.warn,.Copying,.Inventory,.Patching,.Rebooting,.WaitingForOS,.WaitingForSQL,.Validating,.Preflight,.PostVerifying{color:#ffd166}.muted,small{color:#9fb0c3;font-size:11px}tr:hover{background:#17202c}</style></head><body><h1>SQL Patch $((Encode-Html $State.Cycle))</h1><p class="summary">Campaign stage: <b>$((Encode-Html $State.Stage))</b> | updated UTC: $((Encode-Html $State.UpdatedUtc)) | auto-refresh: 5 seconds</p><div class="table-wrap"><table><thead><tr><th>Full instance</th><th>Instance readiness</th><th>Edition / CU</th><th>Current / target build</th><th>Package / release date</th><th>System backup dates</th><th>User backup dates</th><th>Host checks</th><th>Post-verification</th><th>Stage / current activity</th></tr></thead><tbody>$($rows -join "`n")</tbody></table></div><p><small>Backup timestamps are reported in each SQL Server's local time. Update release dates come from Microsoft Learn build history and dashboard generation time is UTC.</small></p></body></html>
+<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5"><title>SQL Patch $((Encode-Html $State.Cycle))</title><style>body{font-family:Segoe UI,Arial;margin:20px;background:#10151d;color:#edf2f7}h1{margin-bottom:4px}.summary{margin-top:0;color:#9fb0c3}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:1700px;font-size:13px}th{position:sticky;top:0;background:#1a2230;color:#bcd0e5}th,td{padding:9px;border:1px solid #354052;text-align:left;vertical-align:top}.ok,.Complete,.Prepared,.Ready,.PreflightReady,.PostVerified{color:#6ee7a8}.bad,.Failed,.Blocked,.PreflightBlocked,.PostVerifyFailed{color:#ff8080}.warn,.Copying,.Inventory,.Patching,.Rebooting,.WaitingForOS,.WaitingForSQL,.Validating,.Preflight,.PostVerifying{color:#ffd166}.muted,small{color:#9fb0c3;font-size:11px}tr:hover{background:#17202c}</style></head><body><h1>SQL Patch $((Encode-Html $State.Cycle))</h1><p class="summary">Campaign stage: <b>$((Encode-Html $State.Stage))</b> | updated UTC: $((Encode-Html $State.UpdatedUtc)) | auto-refresh: 5 seconds</p><div class="table-wrap"><table><thead><tr><th>Full instance</th><th>Instance readiness</th><th>Edition / CU</th><th>Current / target build</th><th>Package / release date</th><th>System backup dates</th><th>User backup dates</th><th>Host checks</th><th>Post-verification</th><th>Stage / current activity</th></tr></thead><tbody>$($rows -join "`n")</tbody></table></div><p><small>Backup timestamps are reported in each SQL Server's local time. Update release dates come from Microsoft Learn build history and dashboard generation time is UTC.</small></p></body></html>
 "@
     [IO.File]::WriteAllText($dashboardPath,$html,[Text.UTF8Encoding]::new($false))
 }
@@ -366,6 +380,21 @@ function Get-PackageReleaseMetadata {
         [pscustomobject]@{UpdateName=if($kb){$kb}else{'Local update'};ReleaseDate='Unknown';PackageAgeDays='Unknown';MetadataSource='Unknown (offline/local media)'}
     }
 }
+function Assert-LatestCuMetadata {
+    param([int]$Major,[string]$Version,[string]$KB)
+    $history=Invoke-WebRequest -Uri $buildHistoryPages[$Major] -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+    $latest=$null
+    foreach($row in [regex]::Matches([string]$history.Content,'<tr[^>]*>[\s\S]*?</tr>','IgnoreCase')){
+        $plain=[Net.WebUtility]::HtmlDecode([regex]::Replace($row.Value,'<[^>]+>',' '))
+        $plain=[regex]::Replace($plain,'\s+',' ').Trim()
+        $match=[regex]::Match($plain,('^CU\d+\s+\(Latest\)\s+({0}\.0\.\d+\.\d+)\b.*?\b(KB\d+)\b'-f$Major),'IgnoreCase')
+        if($match.Success){$latest=$match;break}
+    }
+    if(-not$latest){throw 'Could not verify the latest CU against Microsoft build history. Use reviewed local media instead.'}
+    if([version]$Version-ne[version]$latest.Groups[1].Value-or$KB-ne$latest.Groups[2].Value){
+        throw "Microsoft sources disagree: Download Center offers $KB ($Version), but build history lists $($latest.Groups[2].Value) ($($latest.Groups[1].Value)). No latest package was approved. Use reviewed local media or retry later."
+    }
+}
 function Get-LatestUpdateForMajor {
     param([int]$Major)
     $year=$supported[$Major];$page=$downloadPages[$Major]
@@ -380,6 +409,7 @@ function Get-LatestUpdateForMajor {
     if(-not$urls.Count){$urlMatch=[regex]::Match($html,('https://download\.microsoft\.com/[^"''\s<>]+/{0}(?:\?[^"''\s<>]*)?'-f$filePattern),'IgnoreCase');if($urlMatch.Success){$urls=@($urlMatch.Value)}}
     if(-not$fileMatch.Success-or-not$versionMatch.Success-or-not$cuMatch.Success-or-not$urls.Count){throw "Could not read the latest SQL Server $year CU from Microsoft Download Center. Use reviewed local media instead."}
     $uri=[uri]$urls[0];if($uri.Scheme-ne'https'-or$uri.Host-ne'download.microsoft.com'){throw "Unexpected Microsoft download URL '$uri'."}
+    Assert-LatestCuMetadata -Major $Major -Version $versionMatch.Groups[1].Value -KB $cuMatch.Groups[2].Value
     [pscustomobject]@{Major=$Major;Year=$year;Name="CU$($cuMatch.Groups[1].Value)";KB=$cuMatch.Groups[2].Value.ToUpperInvariant();Version=$versionMatch.Groups[1].Value;FileName=$fileMatch.Value;Uri=$uri.AbsoluteUri}
 }
 function Get-LatestPackageMap {
@@ -417,30 +447,70 @@ function Get-LatestPackageMap {
     $map
 }
 function Copy-VerifiedToSession {
-    param([string]$LocalPath,[string]$RemotePath,[Management.Automation.Runspaces.PSSession]$Session)
-    $localHash=(Get-FileHash $LocalPath -Algorithm SHA256).Hash
-    $existing=Invoke-Command -Session $Session -ArgumentList $RemotePath -ScriptBlock{param($Path);if(Test-Path $Path -PathType Leaf){(Get-FileHash $Path -Algorithm SHA256).Hash}}
+    param([string]$LocalPath,[string]$RemotePath,[Management.Automation.Runspaces.PSSession]$Session,[string]$ExpectedHash)
+    $localHash=if($ExpectedHash){$ExpectedHash}else{(Get-FileHash -LiteralPath $LocalPath).Hash}
+    $existing=Invoke-Command -Session $Session -ArgumentList $RemotePath -ScriptBlock {param($Path);if(Test-Path -LiteralPath $Path -PathType Leaf){(Get-FileHash -LiteralPath $Path).Hash}}
     if($existing-eq$localHash){return 'AlreadyPresent'}
-    $partial=$RemotePath+'.partial'
+    $length=(Get-Item -LiteralPath $LocalPath).Length;$partial=$RemotePath+'.partial'
     for($attempt=1;$attempt-le3;$attempt++){
+        $stream=$null
         try{
-            Invoke-Command -Session $Session -ArgumentList $partial -ScriptBlock{param($Path);Remove-Item $Path -Force -ErrorAction SilentlyContinue}
-            Copy-Item $LocalPath -Destination $partial -ToSession $Session -Force
-            $copiedHash=Invoke-Command -Session $Session -ArgumentList $partial -ScriptBlock{param($Path);(Get-FileHash $Path -Algorithm SHA256).Hash}
-            if($copiedHash-ne$localHash){throw "SHA-256 mismatch after copy attempt $attempt."}
-            Invoke-Command -Session $Session -ArgumentList @($partial,$RemotePath) -ScriptBlock{param($Partial,$Final);Move-Item $Partial $Final -Force}
-            return 'Copied'
-        }
-        catch{
-            Invoke-Command -Session $Session -ArgumentList $partial -ScriptBlock{param($Path);Remove-Item $Path -Force -ErrorAction SilentlyContinue} -ErrorAction SilentlyContinue
-            if($attempt-ge3){throw "Copy to '$RemotePath' failed after three attempts: $($_.Exception.Message)"}
-            Start-Sleep 5
-        }
+            $info=Invoke-Command -Session $Session -ArgumentList $partial -ScriptBlock {
+                param($Path)
+                if(Test-Path -LiteralPath $Path){[pscustomobject]@{Length=(Get-Item -LiteralPath $Path).Length;Hash=(Get-FileHash -LiteralPath $Path).Hash}}
+                else{[pscustomobject]@{Length=0;Hash=''}}
+            }
+            $offset=[long]$info.Length
+            if($offset-gt$length-or($offset-gt0-and(Get-PrefixHash $LocalPath $offset)-ne$info.Hash)){$offset=0}
+            if($offset-eq0){Invoke-Command -Session $Session -ArgumentList $partial -ScriptBlock {param($Path);$f=[IO.File]::Open($Path,[IO.FileMode]::Create,[IO.FileAccess]::Write);$f.Dispose()}}
+            $resumed=$offset-gt0;$initial=$offset
+            $stream=[IO.File]::OpenRead($LocalPath);[void]$stream.Seek($offset,[IO.SeekOrigin]::Begin)
+            $timer=[Diagnostics.Stopwatch]::StartNew();$lastReport=-10.0
+            # One MiB bounds per-worker serialization memory and remote disk bursts.
+            $buffer=New-Object byte[] 1048576
+            while($offset-lt$length){
+                $read=$stream.Read($buffer,0,[int][math]::Min($buffer.Length,$length-$offset))
+                if($read-eq0){throw 'Source file truncated during transfer.'}
+                $chunk=$buffer
+                if($read-ne$buffer.Length){$chunk=New-Object byte[] $read;[Array]::Copy($buffer,$chunk,$read)}
+                Invoke-Command -Session $Session -ArgumentList $partial,$offset,([byte[]]$chunk) -ScriptBlock {
+                    param($Path,[long]$Offset,[byte[]]$Data)
+                    $f=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::None)
+                    try{if($f.Length-ne$Offset){throw 'Partial-file offset changed.'};[void]$f.Seek($Offset,[IO.SeekOrigin]::Begin);$f.Write($Data,0,$Data.Length)}finally{$f.Dispose()}
+                }
+                $offset+=$read
+                $minimumSeconds=($offset-$initial)/1MB/$CopyLimitMBps
+                $delay=$minimumSeconds-$timer.Elapsed.TotalSeconds
+                if($delay-gt0){Start-Sleep -Milliseconds ([int][math]::Ceiling($delay*1000))}
+                if($timer.Elapsed.TotalSeconds-$lastReport-ge2-or$offset-eq$length){
+                    $lastReport=$timer.Elapsed.TotalSeconds
+                    $speed=($offset-$initial)/1MB/[math]::Max(0.01,$timer.Elapsed.TotalSeconds)
+                    Set-ServerState $state $server 'Copying' ('{0}: {1:n1}% ({2:n1}/{3:n1} MiB), {4:n1} MiB/s; attempt {5}' -f [IO.Path]::GetFileName($LocalPath),(100*$offset/[math]::Max(1,$length)),($offset/1MB),($length/1MB),$speed,$attempt)
+                }
+            }
+            $stream.Dispose();$stream=$null
+            Set-ServerState $state $server 'Copying' ("Verifying SHA-256: "+[IO.Path]::GetFileName($LocalPath))
+            $copied=Invoke-Command -Session $Session -ArgumentList $partial -ScriptBlock {param($Path);(Get-FileHash -LiteralPath $Path).Hash}
+            if($copied-ne$localHash){throw 'Final SHA-256 mismatch; source or partial content changed.'}
+            Invoke-Command -Session $Session -ArgumentList $partial,$RemotePath -ScriptBlock {param($Partial,$Final);Move-Item -LiteralPath $Partial -Destination $Final -Force}
+            return $(if($resumed){'Resumed'}else{'Copied'})
+        }catch{
+            if($attempt-ge3){throw "Copy to '$RemotePath' failed; partial retained for verified resume: $($_.Exception.Message)"}
+            Start-Sleep -Seconds 2
+        }finally{if($stream){$stream.Dispose()}}
     }
 }
+. (Join-Path $PSScriptRoot 'SqlPatchParallel.ps1')
+$lockHash=Get-ScopeHash @([IO.Path]::GetFullPath($cycleRoot))
+$engineMutex=New-Object Threading.Mutex($false,("Local\SqlPatchEngine_"+$lockHash))
+$lockHeld=$false
 
 try {
-    $scope=@(Get-Scope);$scopeTargets=@($scope|ForEach-Object Targets);$scopeHash=Get-ScopeHash $scopeTargets
+    try{$lockHeld=$engineMutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$lockHeld=$true}
+    if(-not$lockHeld){throw 'Another operation is already running for this cycle.'}
+    $scope=@(Get-Scope);
+    if($WorkerTarget){$scope=@($scope|Where-Object Server -eq $WorkerTarget);if($scope.Count-ne1){throw 'Worker target is not in the approved scope.'}}
+    $scopeTargets=@($scope|ForEach-Object Targets);$scopeHash=Get-ScopeHash $scopeTargets
     if($Mode-eq'ValidateScope'){Confirm-Scope $scopeTargets;Write-Host "Scope valid: $($scope.Count) server(s), $($scopeTargets.Count) target(s), SHA256 $scopeHash" -ForegroundColor Green;exit 0}
     if($Mode-eq'Dashboard'){
         $state=Read-State;$enriched=$false
@@ -475,15 +545,20 @@ try {
         if(-not$ConfirmBackup){throw 'Backup requires -ConfirmBackup.'}
         if($BackupChoice-ne'1'){throw 'Backup mode requires BackupChoice 1 (system databases).'}
         if($state.Stage-ne'InventoryReady'){throw "Backup requires InventoryReady; current stage is $($state.Stage)."}
+        Resolve-ExecutionHosts $state
         foreach($targetServer in $scope){
             $server=$targetServer.Server;$entry=@($state.Servers|Where-Object { $_.Server -eq $server })[0];$session=$null
             try{
                 Set-ServerState $state $server 'BackingUp' 'Creating and verifying COPY_ONLY system-database backups'
                 $session=New-TargetSession $server
-                Invoke-Command -Session $session -ScriptBlock{New-Item -ItemType Directory -Path 'C:\SqlPatchV3Remote\V2' -Force|Out-Null}
-                foreach($worker in @(Get-ChildItem $V2SourcePath -File)){[void](Copy-VerifiedToSession $worker.FullName "C:\SqlPatchV3Remote\V2\$($worker.Name)" $session)}
+                $backupWorker=Join-Path $V2SourcePath 'Invoke-SqlPatchV2Local.ps1'
+                if(-not(Get-PropertyValue $entry IsController $false)){
+                    Invoke-Command -Session $session -ScriptBlock{New-Item -ItemType Directory -Path 'C:\SqlPatchV3Remote\V2' -Force|Out-Null}
+                    foreach($worker in @(Get-ChildItem $V2SourcePath -File)){[void](Copy-VerifiedToSession $worker.FullName "C:\SqlPatchV3Remote\V2\$($worker.Name)" $session)}
+                    $backupWorker='C:\SqlPatchV3Remote\V2\Invoke-SqlPatchV2Local.ps1'
+                }
                 foreach($instance in @($entry.Instances)){
-                    $backupResult=Invoke-Command -Session $session -ArgumentList @($instance.InstanceName,$BackupChoice) -ScriptBlock{param($Instance,$Backup);$lines=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\SqlPatchV3Remote\V2\Invoke-SqlPatchV2Local.ps1 -InstanceName $Instance -BackupOnly -BackupChoice $Backup);$code=$LASTEXITCODE;[pscustomobject]@{ExitCode=$code;Output=($lines-join"`n")}}
+                    $backupResult=Invoke-Command -Session $session -ArgumentList @($instance.InstanceName,$BackupChoice,$backupWorker) -ScriptBlock{param($Instance,$Backup,$WorkerFile);$lines=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WorkerFile -InstanceName $Instance -BackupOnly -BackupChoice $Backup);$code=$LASTEXITCODE;[pscustomobject]@{ExitCode=$code;Output=($lines-join"`n")}}
                     Write-Host "`n$server\$($instance.InstanceName) system backup result:" -ForegroundColor Cyan
                     Write-Host $backupResult.Output
                     if($backupResult.ExitCode-ne0){throw "V2 backup failed for $($instance.InstanceName) with exit $($backupResult.ExitCode). $($backupResult.Output)"}
@@ -497,15 +572,41 @@ try {
         $state.Stage='InventoryReady';Save-State $state;exit 0
     }
     if($Mode-eq'Prepare'){
-        if($state.Stage-notin@('InventoryReady','Prepared','PreflightReady')){$blocked=@($state.Servers|Where-Object{$_.Status-in@('Blocked','Failed')}|ForEach-Object{"$($_.Server): $($_.Message)"});$detail=if($blocked.Count){' Blockers: '+($blocked-join' | ')}else{''};throw "Prepare was not started. Run Inventory successfully first; current stage is $($state.Stage).$detail"};$packages=if($DownloadLatest){Get-LatestPackageMap $state}else{Get-PackageMap $state}
-        $state.Packages=@($packages.GetEnumerator()|ForEach-Object{[pscustomobject]@{Major=[int]$_.Key;Name=$_.Value.Name;Version=$_.Value.Version;Hash=$_.Value.Hash;Path=$_.Value.Path;UpdateName=$_.Value.UpdateName;ReleaseDate=$_.Value.ReleaseDate;PackageAgeDays=$_.Value.PackageAgeDays;MetadataSource=$_.Value.MetadataSource;ReleaseMetadataSchema=2}})
-        foreach($targetServer in $scope){$server=$targetServer.Server;$session=$null;try{Set-ServerState $state $server 'Copying' 'Hash pre-check; resumable verified staging';$session=New-TargetSession $server;Invoke-Command -Session $session -ScriptBlock{New-Item -ItemType Directory -Path 'C:\SqlPatchV3Remote\V2','C:\SqlPatchV3Remote\Packages' -Force|Out-Null};$results=New-Object Collections.Generic.List[string];Get-ChildItem $V2SourcePath -File|ForEach-Object{$remote="C:\SqlPatchV3Remote\V2\$($_.Name)";$results.Add("worker/$($_.Name): $(Copy-VerifiedToSession $_.FullName $remote $session)")};$entry=@($state.Servers|Where-Object { $_.Server -eq $server })[0];foreach($instance in @($entry.Instances)){$p=$packages[[string]$instance.Major];$instance.TargetVersion=$p.Version;$instance.PackageName=$p.Name;Set-PropertyValue $instance UpdateName $p.UpdateName;Set-PropertyValue $instance ReleaseDate $p.ReleaseDate;Set-PropertyValue $instance PackageAgeDays $p.PackageAgeDays;Set-PropertyValue $instance MetadataSource $p.MetadataSource;Set-PropertyValue $instance ReleaseMetadataSchema 2;$remote="C:\SqlPatchV3Remote\Packages\$($p.Name)";$copyState=Copy-VerifiedToSession $p.Path $remote $session;$instance.DistributionState=$copyState;$instance.PackageState='Staged';$instance.PackageHashVerified='Yes';$results.Add("package/$($p.Name): $copyState; released $($p.ReleaseDate)")};Set-ServerState $state $server 'Prepared' ($results-join'; ')
-        }catch{Set-ServerState $state $server 'Failed' $_.Exception.Message;throw}finally{if($session){Remove-PSSession $session}}};$state.Stage='Prepared';Save-State $state;exit 0
+        if($state.Stage-notin@('InventoryReady','Prepared','PreflightReady','PrepareFailed','PreflightBlocked')){
+            $blocked=@($state.Servers|Where-Object{$_.Status-in@('Blocked','Failed')}|ForEach-Object{"$($_.Server): $($_.Message)"})
+            throw "Prepare was not started. Run Inventory successfully first; current stage is $($state.Stage). $($blocked-join' | ')"
+        }
+        if(-not$WorkerTarget){
+            $packages=if($DownloadLatest){Get-LatestPackageMap $state}else{Get-PackageMap $state}
+            $state.Packages=@($packages.Values)
+            Invoke-ParallelPhase $state Prepare
+        }else{
+            $entry=$state.Servers[0];$server=$entry.Server;$session=$null
+            try{$state.Stage='Preparing';$session=New-TargetSession $server;Prepare-OneServer $state $entry $session;$state.Stage='Prepared';Save-State $state}
+            catch{Set-ServerState $state $server 'Failed' $_.Exception.Message;throw}
+            finally{if($session){Remove-PSSession $session}}
+        }
+        exit 0
     }
     if($Mode-eq'Preflight'){
-        if($state.Stage-notin@('Prepared','PreflightReady')){throw "Preflight requires Prepared state; current stage is $($state.Stage)."}
+        if($state.Stage-eq'InventoryBlocked'-or($state.Stage-eq'InventoryReady'-and-not@($state.Packages).Count)){
+            foreach($entry in $state.Servers){
+                Set-PropertyValue $entry PreflightStatus 'Not ready'
+                Set-PropertyValue $entry PreflightDetails $(if($state.Stage-eq'InventoryBlocked'){'Inventory blocked: '+$entry.Message+'; run option 2'}else{'Packages not prepared; run option 3, then option 4'})
+            }
+            Save-State $state;Show-PreflightSummary $state;exit 1
+        }
+        if($state.Stage-notin@('InventoryReady','Prepared','PreflightReady','PrepareFailed','PreflightBlocked')){throw "Readiness cannot reset stage '$($state.Stage)'. Use PostVerify after Apply."}
+        $preflightFailed=$false
         foreach($targetServer in $scope){$server=$targetServer.Server;$entry=@($state.Servers|Where-Object Server -eq $server)[0];$session=$null
             try{
+                foreach($item in $entry.Instances){$item.PackageHashVerified='Not checked';$item.PackageState='Not verified'}
+                if(-not@($entry.Instances).Count){throw 'No successful instance inventory; run option 2.'}
+                foreach($item in $entry.Instances){
+                    if($item.TargetVersion-eq'Not selected'-or$item.PackageName-eq'Not selected'){throw 'Package not prepared for all selected instances; run option 3.'}
+                    # Older prepared cycles used this fixed destination without persisting it.
+                    if(-not(Get-PropertyValue $item RemotePackagePath '')){Set-PropertyValue $item RemotePackagePath ("C:\SqlPatchV3Remote\Packages\"+$item.PackageName)}
+                }
                 Set-ServerState $state $server 'Preflight' 'Verifying remote inventory, media hashes, disk, reboot state, and backup history'
                 $session=New-TargetSession $server;$inventory=Get-RemoteInventory $session
                 if($inventory.ClusterRegistry-or($inventory.ClusterService-ne'Absent'-and$inventory.ClusterService-ne'Stopped')){throw 'WSFC state appeared after Inventory.'}
@@ -518,24 +619,34 @@ try {
                     $instance.Version=$actual.Version;$instance.UpdateLevel=$actual.UpdateLevel;$instance.Backups=@($actual.Backups);$instance.BackupWarnings=@(Get-BackupWarnings $actual.Backups);$instance.Readiness='Ready';$instance.SqlReady='Yes';$instance.Standalone='Yes';$instance.Sysadmin='Yes'
                     $package=@($state.Packages|Where-Object Major -eq $instance.Major)[0];if(-not$package){throw "Selected package metadata is missing for SQL major $($instance.Major)."}
                     if(-not(Test-Path -LiteralPath $package.Path -PathType Leaf)-or(Get-FileHash -LiteralPath $package.Path -Algorithm SHA256).Hash-ne$package.Hash){throw "Controller package '$($package.Name)' is missing or changed."}
-                    $remotePath="C:\SqlPatchV3Remote\Packages\$($package.Name)"
+                    $remotePath=Get-PropertyValue $instance RemotePackagePath "C:\SqlPatchV3Remote\Packages\$($package.Name)"
                     $remote=Invoke-Command -Session $session -ArgumentList $remotePath -ScriptBlock{param($Path);if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};$sig=Get-AuthenticodeSignature -LiteralPath $Path;[pscustomobject]@{Hash=(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash;Signature=$sig.Status.ToString();Signer=if($sig.SignerCertificate){$sig.SignerCertificate.Subject}else{''}}}
-                    if(-not$remote-or$remote.Hash-ne$package.Hash-or$remote.Signature-ne'Valid'-or$remote.Signer-notmatch'Microsoft Corporation'){throw "Remote package '$($package.Name)' failed hash or Microsoft signature verification."};$instance.PackageName=$package.Name;$instance.PackageState='Signature + SHA-256 verified';$instance.PackageHashVerified='Yes'
+                    if(-not$remote-or$remote.Hash-ne$package.Hash-or$remote.Signature-ne'Valid'-or$remote.Signer-notmatch'Microsoft Corporation'){throw "Remote package '$($package.Name)' failed hash or Microsoft signature verification."};$instance.PackageName=$package.Name;$instance.PackageState='Signature + SHA-256 verified';$instance.PackageHashVerified='Yes';Set-PropertyValue $instance PackageVerifiedUtc ([datetime]::UtcNow.ToString('o'));Set-PropertyValue $instance PackageSha256 $package.Hash
                 }
-                foreach($worker in Get-ChildItem -LiteralPath $V2SourcePath -File){$remotePath="C:\SqlPatchV3Remote\V2\$($worker.Name)";$remoteHash=Invoke-Command -Session $session -ArgumentList $remotePath -ScriptBlock{param($Path);if(Test-Path -LiteralPath $Path -PathType Leaf){(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash}};if($remoteHash-ne(Get-FileHash -LiteralPath $worker.FullName -Algorithm SHA256).Hash){throw "Remote worker '$($worker.Name)' failed hash verification."}}
+                foreach($worker in Get-ChildItem -LiteralPath $V2SourcePath -File){$remotePath=if(Get-PropertyValue $entry IsController $false){$worker.FullName}else{"C:\SqlPatchV3Remote\V2\$($worker.Name)"};$remoteHash=Invoke-Command -Session $session -ArgumentList $remotePath -ScriptBlock{param($Path);if(Test-Path -LiteralPath $Path -PathType Leaf){(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash}};if($remoteHash-ne(Get-FileHash -LiteralPath $worker.FullName -Algorithm SHA256).Hash){throw "Remote worker '$($worker.Name)' failed hash verification."}}
                 $hostState=Invoke-Command -Session $session -ScriptBlock{[pscustomobject]@{FreeBytes=[long](Get-Volume C).SizeRemaining;PendingReboot=(Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')-or(Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired');PartialFiles=@(Get-ChildItem 'C:\SqlPatchV3Remote' -Filter '*.partial' -Recurse -File -ErrorAction SilentlyContinue).Count}}
                 $entry.FreeGiB=[math]::Round($hostState.FreeBytes/1GB,2);$entry.PendingReboot=[string][bool]$hostState.PendingReboot;$entry.PartialFiles=[int]$hostState.PartialFiles
                 if($hostState.FreeBytes-lt$MinimumTargetFreeBytes){throw "Only $([math]::Round($hostState.FreeBytes/1GB,2)) GiB is free; minimum is $([math]::Round($MinimumTargetFreeBytes/1GB,2)) GiB."}
                 if($hostState.PendingReboot){throw 'A pending reboot exists before patching.'};if($hostState.PartialFiles){throw "$($hostState.PartialFiles) partial distribution file(s) exist."}
                 $warningCount=@($entry.Instances|ForEach-Object BackupWarnings).Count
-                Set-ServerState $state $server 'PreflightReady' ("All remote hashes/readiness checks passed; {0} backup warning(s)" -f $warningCount)
-            }catch{Set-ServerState $state $server 'Failed' $_.Exception.Message;$state.Stage='PreflightBlocked';Save-State $state;throw}finally{if($session){Remove-PSSession $session}}
+                Set-PropertyValue $entry PreflightStatus 'Ready'
+                Set-PropertyValue $entry PreflightDetails ("Checks passed; {0} backup warning(s)" -f $warningCount)
+                Set-ServerState $state $server 'PreflightReady' $entry.PreflightDetails
+            }catch{
+                $preflightFailed=$true
+                Set-PropertyValue $entry PreflightStatus 'Not ready'
+                Set-PropertyValue $entry PreflightDetails $_.Exception.Message
+                foreach($item in $entry.Instances){$item.Readiness='Blocked'}
+                Set-ServerState $state $server 'PreflightBlocked' $_.Exception.Message
+            }finally{if($session){Remove-PSSession $session}}
         }
-        $state.Stage='PreflightReady';Save-State $state;exit 0
+        $state.Stage=if($preflightFailed){'PreflightBlocked'}else{'PreflightReady'}
+        Save-State $state;Show-PreflightSummary $state
+        if($preflightFailed){exit 1};exit 0
     }
     if($Mode-eq'PostVerify'){
-        if($state.Stage-notin@('InventoryReady','Prepared','PreflightReady','Applying','Failed','Complete','PostVerified','PostVerifyFailed')){throw "PostVerify requires completed Inventory or a later stage; current stage is $($state.Stage)."}
-        $previousStage=$state.Stage;$baseStage=if($previousStage-in@('PostVerified','PostVerifyFailed')){Get-PropertyValue $state 'PostVerifyBaseStage' $previousStage}else{$previousStage};Set-PropertyValue $state PostVerifyBaseStage $baseStage;$postPatch=$baseStage-in@('Applying','Failed','Complete');$previousServerState=@{}
+        if($state.Stage-notin@('InventoryReady','Prepared','PreflightReady','Applying','Failed','Complete','PostVerified','PostVerifyFailed','AwaitingControllerRestart')){throw "PostVerify requires completed Inventory or a later stage; current stage is $($state.Stage)."}
+        $previousStage=$state.Stage;$baseStage=if($previousStage-in@('PostVerified','PostVerifyFailed')){Get-PropertyValue $state 'PostVerifyBaseStage' $previousStage}else{$previousStage};Set-PropertyValue $state PostVerifyBaseStage $baseStage;$postPatch=$baseStage-in@('Applying','Failed','Complete','AwaitingControllerRestart');$previousServerState=@{}
         foreach($entry in @($state.Servers)){$previousServerState[$entry.Server]=[pscustomobject]@{Status=$entry.Status;Message=$entry.Message}}
         $state.Stage='PostVerifying';Save-State $state;$failed=$false
         foreach($targetServer in $scope){
@@ -545,6 +656,8 @@ try {
                 $session=New-TargetSession $server;$names=@($entry.Instances|ForEach-Object InstanceName)
                 $first=Get-RemotePostVerification $session $names;Start-Sleep -Seconds 2;$second=Get-RemotePostVerification $session $names
                 $serverIssues=New-Object Collections.Generic.List[string]
+                $bootBefore=Get-PropertyValue $entry BootBeforeReboot ''
+                if((Get-PropertyValue $entry NeedsReboot $false)-and(-not$bootBefore-or$second.LastBootUtc-eq$bootBefore)){$serverIssues.Add('Required restart has not been confirmed')}
                 if($second.StoppedAutomaticSqlServices.Count){$serverIssues.Add("Automatic SQL service(s) not running: $($second.StoppedAutomaticSqlServices-join', ')")}
                 if($second.PendingReboot){$serverIssues.Add('Pending reboot remains')};if($second.PartialFiles){$serverIssues.Add("$($second.PartialFiles) partial package file(s) remain")};if($second.FreeBytes-lt$MinimumTargetFreeBytes){$serverIssues.Add("Only $([math]::Round($second.FreeBytes/1GB,2)) GiB free")}
                 Set-PropertyValue $entry FreeGiB ([math]::Round($second.FreeBytes/1GB,2));Set-PropertyValue $entry PendingReboot ([string][bool]$second.PendingReboot);Set-PropertyValue $entry PartialFiles ([int]$second.PartialFiles);Set-PropertyValue $entry LastBootUtc $second.LastBootUtc
@@ -571,11 +684,19 @@ try {
         Save-State $state;if($failed){exit 1};exit 0
     }
     if($Mode-eq'Apply'){
-        if(-not$ConfirmApply){throw 'Apply requires -ConfirmApply.'};$resumeAfterPostVerify=$state.Stage-eq'PostVerifyFailed'-and(Get-PropertyValue $state 'PostVerifyBaseStage' '')-in@('Applying','Failed');if($state.Stage-notin@('PreflightReady','Applying','Failed')-and-not$resumeAfterPostVerify){throw "Apply requires PreflightReady state or a failed Apply resume state; current stage is $($state.Stage)."};$state.Stage='Applying';Save-State $state
-        foreach($targetServer in $scope){$server=$targetServer.Server;$entry=@($state.Servers|Where-Object { $_.Server -eq $server })[0];if($entry.Status-eq'Complete'){continue};$session=$null;$patched=$false;try{$session=New-TargetSession $server;foreach($instance in @($entry.Instances)){if([version]$instance.Version-ge[version]$instance.TargetVersion){continue};$packageRecord=@($state.Packages|Where-Object { [int]$_.Major -eq [int]$instance.Major })[0];if(-not$packageRecord){throw "Frozen package metadata is missing for SQL major $($instance.Major)."};$package=Invoke-Command -Session $session -ArgumentList $packageRecord.Name -ScriptBlock{param($Name);$path="C:\SqlPatchV3Remote\Packages\$Name";if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw "Frozen package is missing: $path"};$path};if($BackupChoice-ne'0'){Set-ServerState $state $server 'BackingUp' "COPY_ONLY choice $BackupChoice for $($instance.InstanceName)";$backupResult=Invoke-Command -Session $session -ArgumentList @($instance.InstanceName,$BackupChoice) -ScriptBlock{param($Instance,$Backup);$lines=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\SqlPatchV3Remote\V2\Invoke-SqlPatchV2Local.ps1 -InstanceName $Instance -BackupOnly -BackupChoice $Backup);$code=$LASTEXITCODE;[pscustomobject]@{ExitCode=$code;Output=($lines-join"`n")}};if($backupResult.ExitCode-ne0){throw "V2 backup failed for $($instance.InstanceName) with exit $($backupResult.ExitCode). $($backupResult.Output)"}};Set-ServerState $state $server 'Patching' "Installing $($instance.InstanceName) to $($instance.TargetVersion)";$output=Invoke-Command -Session $session -ArgumentList @($instance.InstanceName,$package) -ScriptBlock{param($Instance,$Package);$lines=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\SqlPatchV3Remote\V2\Invoke-SqlPatchV2Local.ps1 -InstanceName $Instance -BackupChoice 0 -LocalPackagePath $Package -ConfirmInstall -Restart No);$code=$LASTEXITCODE;[pscustomobject]@{ExitCode=$code;Output=($lines-join"`n")}};if($output.ExitCode-ne0){throw "V2 patch failed for $($instance.InstanceName) with exit $($output.ExitCode). $($output.Output)"};$patched=$true}
-            if($patched){Set-ServerState $state $server 'Rebooting' 'Update installed; mandatory graceful remote restart requested';Invoke-Command -Session $session -ScriptBlock{shutdown.exe /r /t 5 /d p:4:2 /c 'SQL patch V3 completed; mandatory restart'|Out-Null};Remove-PSSession $session;$session=$null;Set-ServerState $state $server 'WaitingForOS' 'Waiting for remote PowerShell after restart';$deadline=[datetime]::UtcNow.AddSeconds($ReadyTimeoutSeconds);$ready=0;$requiredNames=@($entry.Instances|ForEach-Object InstanceName);while([datetime]::UtcNow-lt$deadline-and$ready-lt2){$candidate=$null;try{$candidate=New-TargetSession $server;$probe=Get-RemoteInventory $candidate;$selected=@($probe.Instances|Where-Object{$_.InstanceName-in$requiredNames});$queryReady=$selected.Count-eq$requiredNames.Count-and@($selected|Where-Object{$_.PSObject.Properties.Name-contains'Error'}).Count-eq0;if($queryReady){$ready++;if($ready-ge2){$session=$candidate;$candidate=$null}}else{$ready=0}}catch{$ready=0}finally{if($candidate){Remove-PSSession $candidate}};if($ready-lt2){Start-Sleep 10}};if($ready-lt2){throw "Server did not become SQL-ready within $ReadyTimeoutSeconds seconds."};Set-ServerState $state $server 'WaitingForSQL' 'Two consecutive selected-instance SQL query readiness probes passed'}
-            Set-ServerState $state $server 'Validating' 'Querying final SQL builds';$final=Get-RemoteInventory $session;foreach($instance in @($entry.Instances)){$actual=@($final.Instances|Where-Object { $_.InstanceName -eq $instance.InstanceName })[0];if(-not$actual-or[version]$actual.Version-lt[version]$instance.TargetVersion){throw "$($instance.InstanceName) did not reach target $($instance.TargetVersion)."};$instance.Version=$actual.Version};Set-ServerState $state $server 'Complete' $(if($patched){'All selected updates installed; remote server rebooted and SQL readiness passed'}else{'All selected instances were already at or above supplied package builds; no reboot required'})
-        }catch{Set-ServerState $state $server 'Failed' $_.Exception.Message;$state.Stage='Failed';Save-State $state;throw}finally{if($session){Remove-PSSession $session}}};$state.Stage='Complete';Save-State $state;exit 0
+        if(-not$ConfirmApply){throw 'Apply requires -ConfirmApply.'}
+        $resumeAfterPostVerify=$state.Stage-eq'PostVerifyFailed'-and(Get-PropertyValue $state 'PostVerifyBaseStage' '')-in@('Applying','Failed')
+        if($state.Stage-notin@('PreflightReady','Applying','Failed')-and-not$resumeAfterPostVerify){throw "Apply requires PreflightReady or a failed Apply resume; current stage is $($state.Stage)."}
+        if(-not$WorkerTarget-and@($state.Servers|Where-Object {(Get-PropertyValue $_ DispatchPending $false)-or$_.Status-in@('Dispatching','Patching','BackingUp','NeedsReview')}).Count){throw 'An earlier worker outcome is uncertain. Review target setup state before resuming.'}
+        if(-not$WorkerTarget){Invoke-ParallelPhase $state Apply}
+        else{
+            $entry=$state.Servers[0];$server=$entry.Server;$session=$null
+            try{$state.Stage='Applying';$session=New-TargetSession $server;Apply-OneServer $state $entry $session;$state.Stage='Complete';Save-State $state}
+            catch{Set-ServerState $state $server 'Failed' $_.Exception.Message;throw}
+            finally{if($session){Remove-PSSession $session -ErrorAction SilentlyContinue}}
+        }
+        exit 0
     }
 }
-catch{Write-Host "`nFAILED: $($_.Exception.Message)" -ForegroundColor Red;exit 1}
+catch{Write-Host ("FAILED: "+$_.Exception.Message) -ForegroundColor Red;exit 1}
+finally{if($lockHeld){$engineMutex.ReleaseMutex()};$engineMutex.Dispose()}

@@ -27,3 +27,12 @@ Thumbs.db
 !/tests/Run-Tests.ps1
 !/tests/Test-WinRm.ps1
 /AGENTS.md
+
+!/tests/Test-Parallel.ps1
+!/tests/Test-Transfer.ps1
+!/tests/Test-Apply.ps1
+
+!/tests/Test-Smb.ps1
+!/tests/Test-Readiness.ps1
+!/tests/Test-Latest.ps1
+!/tests/Test-Menu.ps1

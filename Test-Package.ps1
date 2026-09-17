@@ -4,7 +4,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $failures=New-Object Collections.Generic.List[string]
-$required=@('Invoke-SqlPatchV3Remote.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1','Install-SqlPatchOrchestrator.ps1','Install-FromGitHub.ps1','Install.cmd','Build-Release.ps1','scripts\Test-Repository.ps1','tests\Run-Tests.ps1','targets.txt','README.md','CHANGELOG.md','NEXT-STEPS.md','SECURITY.md','LICENSE','VERSION')
+$required=@('Invoke-SqlPatchV3Remote.ps1','SqlPatchParallel.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1','Install-SqlPatchOrchestrator.ps1','Install-FromGitHub.ps1','Install.cmd','Build-Release.ps1','scripts\Test-Repository.ps1','tests\Run-Tests.ps1','tests\Test-Parallel.ps1','tests\Test-Transfer.ps1','tests\Test-Apply.ps1','tests\Test-Smb.ps1','tests\Test-Readiness.ps1','targets.txt','README.md','CHANGELOG.md','NEXT-STEPS.md','SECURITY.md','LICENSE','VERSION')
+$required+=@('tests\Test-Latest.ps1','tests\Test-Menu.ps1')
 foreach($name in $required){$path=Join-Path $PSScriptRoot $name;if(-not(Test-Path $path -PathType Leaf)){$failures.Add("Missing '$name'.")}}
 foreach($name in $required|Where-Object{$_-match'\.ps1$'}){$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $name),[ref]$tokens,[ref]$errors);if($errors.Count){$failures.Add("$name parse errors: $($errors.Message-join'; ')")}}
 $engine=Get-Content (Join-Path $PSScriptRoot 'Invoke-SqlPatchV3Remote.ps1') -Raw

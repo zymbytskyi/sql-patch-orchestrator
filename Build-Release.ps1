@@ -1,11 +1,11 @@
 <# .SYNOPSIS Builds a ZIP with a top-level SqlPatchOrchestrator folder. #>
 #Requires -Version 5.1
 [CmdletBinding()]
-param([ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version='3.0.8',[string]$OutputDirectory)
+param([ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version='3.1.0',[string]$OutputDirectory)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 if([string]::IsNullOrWhiteSpace($OutputDirectory)){$OutputDirectory=Join-Path $PSScriptRoot 'Release'}
-$files=@('Invoke-SqlPatchV3Remote.ps1','Start-SqlPatchV3Menu.ps1','Install-SqlPatchOrchestrator.ps1','Install-FromGitHub.ps1','Install.cmd','targets.txt','README.md','SECURITY.md','LICENSE','VERSION')
+$files=@('Invoke-SqlPatchV3Remote.ps1','SqlPatchParallel.ps1','Start-SqlPatchV3Menu.ps1','Install-SqlPatchOrchestrator.ps1','Install-FromGitHub.ps1','Install.cmd','targets.txt','README.md','SECURITY.md','LICENSE','VERSION')
 foreach($name in $files){if(-not(Test-Path (Join-Path $PSScriptRoot $name) -PathType Leaf)){throw "Missing release file '$name'."}}
 if(-not(Test-Path (Join-Path $PSScriptRoot 'SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1') -PathType Leaf)){throw 'Bundled V2 worker is missing.'}
 $buildRoot=Join-Path ([IO.Path]::GetTempPath()) ('SqlPatchOrchestrator-'+[guid]::NewGuid().ToString('N'))

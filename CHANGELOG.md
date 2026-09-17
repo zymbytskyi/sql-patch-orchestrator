@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.1.0 - 2026-09-17
+
+- Default package transport is restartable SMB/Robocopy with three-host concurrency and an explicit PowerShell fallback. No firewall or share policy changes.
+- Dashboard includes target folder/file, transport, SHA-256, and verification time; green requires verified media.
+- Option 4 reports concise per-host readiness before or after preparation, continues past individual failures, and supports rechecks without weakening Apply gates.
+
+- Added bounded parallel Prepare (3 hosts) and Apply (2 hosts), with configurable limits and controller CPU/RAM admission checks.
+- Added rate-limited chunk transfer, verified partial resume, existing-package reuse, and live transfer progress.
+- Reuses controller-local packages; patches controller SQL last without automatic controller reboot.
+- Added physical-host alias rejection, per-cycle locks, atomic state snapshots, child journals, uncertain-install guards, and reboot confirmation using boot time.
+- Passed real two-host parallel SQL 2022 CU27 installation, graceful reboots and post-verification, plus system-only COPY_ONLY backups and cross-VM SMB/hash/reuse tests.
+- Added latest-CU cross-source verification; stale Download Center metadata is rejected instead of silently selecting an older CU.
+- Fixed cycle switching when legacy state is missing its cycle label; added all-menu-route regression coverage.
+- Clarified safe ZIP upgrades: extract separately, then install while preserving existing runtime data.
+
 ## 3.0.8 - 2026-09-17
 
 - Fixed the unhandled TrustedHosts/implicit-credentials WinRM error in all remote phases and direct script invocation.

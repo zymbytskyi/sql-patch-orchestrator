@@ -6,7 +6,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $sourceRoot=$PSScriptRoot
 $payloadRoot=if(Test-Path (Join-Path $sourceRoot 'SqlPatchOrchestrator') -PathType Container){Join-Path $sourceRoot 'SqlPatchOrchestrator'}else{$sourceRoot}
-$required=@('Invoke-SqlPatchV3Remote.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1','README.md','LICENSE')
+$required=@('Invoke-SqlPatchV3Remote.ps1','SqlPatchParallel.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1','README.md','LICENSE')
 foreach($name in $required){if(-not(Test-Path (Join-Path $payloadRoot $name) -PathType Leaf)){throw "Package file '$name' is missing."}}
 $manifest=Join-Path $payloadRoot 'manifest.sha256'
 if(Test-Path $manifest -PathType Leaf){
@@ -23,7 +23,7 @@ if($resolvedPayload-ne$resolvedDestination){
     if(Test-Path $Destination){
         if(-not$Force){$answer=Read-Host "'$Destination' already exists. Replace program files and keep targets/packages/runs? [y/N]";if($answer-notmatch'^(?i:y|yes)$'){Write-Host 'Installation cancelled.';exit 0}}
     }else{New-Item -ItemType Directory -Path $Destination -Force|Out-Null}
-    foreach($name in @('Invoke-SqlPatchV3Remote.ps1','Start-SqlPatchV3Menu.ps1','Install-FromGitHub.ps1','README.md','SECURITY.md','LICENSE','VERSION')){Copy-Item (Join-Path $payloadRoot $name) (Join-Path $Destination $name) -Force}
+    foreach($name in @('Invoke-SqlPatchV3Remote.ps1','SqlPatchParallel.ps1','Start-SqlPatchV3Menu.ps1','Install-FromGitHub.ps1','README.md','SECURITY.md','LICENSE','VERSION')){Copy-Item (Join-Path $payloadRoot $name) (Join-Path $Destination $name) -Force}
     $workerDestination=Join-Path $Destination 'SqlPatchV2Local'
     New-Item -ItemType Directory -Path $workerDestination -Force|Out-Null
     Copy-Item (Join-Path $payloadRoot 'SqlPatchV2Local\*') $workerDestination -Force

@@ -6,7 +6,11 @@ param(
     [string]$PackageRoot,
     [string]$RunRoot,
     [ValidateSet('WinRM','PowerShellDirect')][string]$Transport='WinRM',
-    [pscredential]$Credential
+    [pscredential]$Credential,
+    [ValidateSet('SMB','PowerShell')][string]$CopyMethod='SMB',
+    [ValidateRange(1,8)][int]$CopyConcurrency=3,
+    [ValidateRange(1,4)][int]$ApplyConcurrency=2,
+    [ValidateRange(1,1024)][int]$CopyLimitMBps=20
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
@@ -26,7 +30,7 @@ function Select-PatchCycle{
     param([string]$RequestedCycle)
     $suggested=(Get-Date).ToString('yyyy-MM',[Globalization.CultureInfo]::InvariantCulture)
     if([string]::IsNullOrWhiteSpace($RequestedCycle)){
-        $existing=@(Get-ChildItem -LiteralPath $RunRoot -Directory -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending|ForEach-Object{$stateFile=Join-Path $_.FullName 'state.json';if(Test-Path -LiteralPath $stateFile -PathType Leaf){try{[string](Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8|ConvertFrom-Json).Cycle}catch{[string]$_.Name}}else{[string]$_.Name}}|Where-Object{$_}|Select-Object -Unique)
+        $existing=@(Get-ChildItem -LiteralPath $RunRoot -Directory -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending|ForEach-Object{$folderName=$_.Name;$stateFile=Join-Path $_.FullName 'state.json';if(Test-Path -LiteralPath $stateFile -PathType Leaf){try{[string](Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8|ConvertFrom-Json).Cycle}catch{[string]$folderName}}else{[string]$folderName}}|Where-Object{$_}|Select-Object -Unique)
         if($existing.Count){Write-Host ('Existing cycles: '+($existing-join', ')) -ForegroundColor DarkGray}
         $RequestedCycle=Read-Host "Cycle name [$suggested]"
         if([string]::IsNullOrWhiteSpace($RequestedCycle)){$RequestedCycle=$suggested}
@@ -45,7 +49,7 @@ function Show-InventoryBlockers{
     Write-Host 'Fix the listed target, access, SQL, or standalone-safety issue, then run option 2 again.' -ForegroundColor Yellow
 }
 $Cycle=Select-PatchCycle $Cycle
-$common=@{Cycle=$Cycle;PackageRoot=$PackageRoot;RunRoot=$RunRoot;Transport=$Transport}
+$common=@{Cycle=$Cycle;PackageRoot=$PackageRoot;RunRoot=$RunRoot;Transport=$Transport;CopyMethod=$CopyMethod;CopyConcurrency=$CopyConcurrency;ApplyConcurrency=$ApplyConcurrency;CopyLimitMBps=$CopyLimitMBps}
 if($Credential){$common.Credential=$Credential}
 $mutexBytes=[Text.Encoding]::UTF8.GetBytes($PSScriptRoot.ToLowerInvariant());$mutexSha=[Security.Cryptography.SHA256]::Create()
 try{$mutexId=([BitConverter]::ToString($mutexSha.ComputeHash($mutexBytes))).Replace('-','')}finally{$mutexSha.Dispose()}
@@ -57,12 +61,14 @@ try{while($true){
     Write-Host '====================================='
     Write-Host ('Version: '+(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'VERSION') -Raw).Trim())
     Write-Host "Cycle: $Cycle"
+    Write-Host "Transfer: $CopyMethod | Parallel limits: copy $CopyConcurrency (up to $CopyLimitMBps MiB/s each); Apply $ApplyConcurrency"
+    Write-Host 'Controller SQL runs last; controller restart is manual after remote targets finish.'
     Write-Host ("Remote account: {0}" -f $(if($common.ContainsKey('Credential')){$common.Credential.UserName}else{[Security.Principal.WindowsIdentity]::GetCurrent().Name+' (current Windows account)'}))
     Write-Host '1. Open target list (SERVER or SERVER\INSTANCE)'
     Write-Host '2. Inventory, backup review, and optional COPY_ONLY backup'
     Write-Host '3. Choose/download latest CUs, verify, and distribute (NO INSTALL)'
-    Write-Host '4. Final remote preflight (READ ONLY)'
-    Write-Host '5. Apply sequentially and always reboot patched targets'
+    Write-Host '4. Check readiness per host (READ ONLY)'
+    Write-Host '5. Apply with bounded parallelism (controller last)'
     Write-Host '6. Post-patch verification (READ ONLY)'
     Write-Host '7. Show current status and open dashboard'
     Write-Host '8. Select or create another patch cycle'
@@ -96,10 +102,18 @@ try{while($true){
             }
             '3'{
                 $inventoryState=Get-CycleState
-                if(-not$inventoryState-or$inventoryState.Stage-notin@('InventoryReady','Prepared','PreflightReady')){Show-InventoryBlockers $inventoryState;Pause-Menu;continue}
+                if(-not$inventoryState-or$inventoryState.Stage-notin@('InventoryReady','Prepared','PreflightReady','PrepareFailed','PreflightBlocked')){Show-InventoryBlockers $inventoryState;Pause-Menu;continue}
                 Write-Host '1. Use reviewed Microsoft EXEs already in Packages (default)'
                 Write-Host '2. Download latest CUs from Microsoft automatically'
                 $source=Read-Host 'Select [1]';if([string]::IsNullOrWhiteSpace($source)){$source='1'}
+                if($Transport-ne'PowerShellDirect'){
+                    Write-Host 'Transfer: 1 SMB/Robocopy (recommended), 2 PowerShell (slower fallback)'
+                    $method=Read-Host 'Select [1]'
+                    if([string]::IsNullOrWhiteSpace($method)-or$method-eq'1'){$CopyMethod='SMB'}
+                    elseif($method-eq'2'){$CopyMethod='PowerShell'}
+                    else{throw 'Transfer choice must be 1 or 2.'}
+                    $common.CopyMethod=$CopyMethod
+                }
                 if($source-eq'1'){& $engine -Mode Prepare @common}
                 elseif($source-eq'2'){& $engine -Mode Prepare @common -DownloadLatest}
                 else{throw 'Package source must be 1 or 2.'}
