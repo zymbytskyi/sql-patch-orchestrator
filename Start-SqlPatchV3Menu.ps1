@@ -44,18 +44,6 @@ function Show-InventoryBlockers{
     if($State){Write-Host "Current stage: $($State.Stage)";foreach($server in @($State.Servers|Where-Object{$_.Status-in@('Blocked','Failed')})){Write-Host ("  {0}: {1} - {2}" -f $server.Server,$server.Status,$server.Message) -ForegroundColor Yellow}}
     Write-Host 'Fix the listed target, access, SQL, or standalone-safety issue, then run option 2 again.' -ForegroundColor Yellow
 }
-function Test-InventoryAccessDenied{
-    param($State)
-    if(-not$State){return $false}
-    return @($State.Servers|Where-Object{$_.Status-eq'Failed'-and$_.Message-match'(?i)Access is denied|0x80070005'}).Count-gt0
-}
-function Enable-TrustAllWinRmHosts{
-    $path='WSMan:\localhost\Client\TrustedHosts'
-    $current=[string](Get-Item -Path $path -ErrorAction Stop).Value
-    if($current-eq'*'){Write-Host 'WinRM TrustedHosts is already * on this controller.' -ForegroundColor DarkGray;return}
-    Set-Item -Path $path -Value '*' -Force -ErrorAction Stop
-    Write-Host 'WinRM TrustedHosts was set to * on this controller.' -ForegroundColor Yellow
-}
 $Cycle=Select-PatchCycle $Cycle
 $common=@{Cycle=$Cycle;PackageRoot=$PackageRoot;RunRoot=$RunRoot;Transport=$Transport}
 if($Credential){$common.Credential=$Credential}
@@ -67,6 +55,7 @@ try{while($true){
     Clear-Host
     Write-Host 'SQL PATCH V3 REMOTE - STANDALONE ONLY'
     Write-Host '====================================='
+    Write-Host ('Version: '+(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'VERSION') -Raw).Trim())
     Write-Host "Cycle: $Cycle"
     Write-Host ("Remote account: {0}" -f $(if($common.ContainsKey('Credential')){$common.Credential.UserName}else{[Security.Principal.WindowsIdentity]::GetCurrent().Name+' (current Windows account)'}))
     Write-Host '1. Open target list (SERVER or SERVER\INSTANCE)'
@@ -87,16 +76,6 @@ try{while($true){
                 $inventoryCode=$LASTEXITCODE
                 Write-Host "Inventory exit code: $inventoryCode"
                 $inventoryState=Get-CycleState
-                if($inventoryCode-ne0-and(Test-InventoryAccessDenied $inventoryState)){
-                    try{
-                        Enable-TrustAllWinRmHosts
-                        Write-Host ("Retrying Inventory with current account '{0}'..." -f [Security.Principal.WindowsIdentity]::GetCurrent().Name) -ForegroundColor Cyan
-                        & $engine -Mode Inventory @common
-                        $inventoryCode=$LASTEXITCODE
-                        $inventoryState=Get-CycleState
-                        Write-Host "Retry Inventory exit code: $inventoryCode"
-                    }catch{Write-Host "Could not configure WinRM TrustedHosts: $($_.Exception.Message)" -ForegroundColor Red}
-                }
                 if($inventoryCode-eq0){
                     $statePath=Join-Path (Join-Path $RunRoot (Get-CycleStorageKey $Cycle)) 'state.json'
                     $inventoryState=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json

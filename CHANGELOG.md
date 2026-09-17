@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.0.8 - 2026-09-17
+
+- Fixed the unhandled TrustedHosts/implicit-credentials WinRM error in all remote phases and direct script invocation.
+- Adds the failing approved target to controller TrustedHosts, preserves existing entries, records the previous value, verifies the effective setting, and retries once with the same identity.
+- Distinguishes target access denial and Group Policy restrictions from client trust errors.
+- Removed the 12-server scope limit and reduced repeated backup output during inventory.
+- Displays the installed version and installs the updater during fresh ZIP installation.
+- Added behavioral regression tests for mixed hosts, larger scopes, blocked policy, persistent failures, and backup-warning-only inventory.
+
 ## 3.0.7 - 2026-08-27
 
 - Replaced the alternate-credential prompt with automatic controller-side `WinRM TrustedHosts = *` configuration after an inventory `Access is denied` result.

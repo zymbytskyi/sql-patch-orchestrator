@@ -88,7 +88,6 @@ function Get-Scope {
         [pscustomobject]@{ Server=$matches[1]; Instance=if($matches[2]){$matches[2]}else{''}; Target=$line }
     }
     $groups = @($parsed | Group-Object Server)
-    if ($groups.Count -gt 12) { throw "The target list has $($groups.Count) servers; maximum is 12." }
     foreach ($group in $groups) {
         $all = @($group.Group | Where-Object { -not $_.Instance })
         if ($all.Count -and $group.Count -gt 1) { throw "Server '$($group.Name)' mixes a whole-server target with instance targets." }
@@ -105,14 +104,51 @@ function Get-ScopeHash {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','') } finally { $sha.Dispose() }
 }
+function Add-TargetTrustedHost {
+    param([string]$Server)
+    $path='WSMan:\localhost\Client\TrustedHosts'
+    try {
+        $item=Get-Item -Path $path -ErrorAction Stop
+        $previous=[string]$item.Value
+        $entries=@($previous -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        if(@($entries | Where-Object { $Server -like $_ }).Count){return}
+        if($item.PSObject.Properties.Name -contains 'SourceOfValue' -and $item.SourceOfValue -eq 'GPO'){
+            throw 'TrustedHosts is managed by Group Policy. Ask the Windows administrator to permit this target.'
+        }
+        $updated=(@($entries)+@($Server))-join','
+        # Record the previous controller setting before changing it; never store credentials.
+        New-Item -ItemType Directory -Path $cycleRoot -Force -ErrorAction Stop | Out-Null
+        $audit=[pscustomobject]@{Utc=[datetime]::UtcNow.ToString('o');Target=$Server;Previous=$previous;Requested=$updated}
+        Add-Content -LiteralPath (Join-Path $cycleRoot 'winrm-client-changes.jsonl') -Value ($audit|ConvertTo-Json -Compress) -Encoding UTF8 -ErrorAction Stop
+        Set-Item -Path $path -Value $updated -Force -ErrorAction Stop
+        $effective=[string](Get-Item -Path $path -ErrorAction Stop).Value
+        if(-not @($effective -split ',' | Where-Object { $Server -like $_.Trim() }).Count){throw 'The effective TrustedHosts setting does not include the target; check Group Policy.'}
+        Write-Host "WinRM: added '$Server' to controller TrustedHosts; existing entries preserved." -ForegroundColor Yellow
+    }catch{throw "WinRM client configuration for '$Server' failed. Run Windows PowerShell as Administrator; check controller Group Policy. $($_.Exception.Message)"}
+}
 function New-TargetSession {
     param([string]$Server)
     if ($Transport -eq 'PowerShellDirect') {
         if (-not $Credential) { throw 'PowerShellDirect transport requires -Credential.' }
         return New-PSSession -VMName $Server -Credential $Credential
     }
-    if ($Credential) { return New-PSSession -ComputerName $Server -Authentication Negotiate -Credential $Credential }
-    New-PSSession -ComputerName $Server -Authentication Negotiate
+    $parameters=@{ComputerName=$Server;Authentication='Negotiate';ErrorAction='Stop'}
+    if($Credential){$parameters.Credential=$Credential}
+    try{return New-PSSession @parameters}
+    catch{
+        $failure=$_
+        # This client policy error differs from a target rejecting the account.
+        if($failure.Exception.Message -match '(?i)TrustedHosts|Allow\s+implicit\s+credentials\s+for\s+Negotiate'){
+            Add-TargetTrustedHost $Server
+            Write-Host "WinRM: retrying '$Server' once with the same Windows identity." -ForegroundColor Cyan
+            try{return New-PSSession @parameters}
+            catch{throw "WinRM connection to '$Server' still failed after TrustedHosts verification: $($_.Exception.Message)"}
+        }
+        if($failure.Exception.Message -match '(?i)Access is denied|0x80070005'){
+            throw "WinRM access denied on '$Server'. Check this account's target remoting endpoint permissions and local Administrator membership; TrustedHosts does not grant these rights. $($failure.Exception.Message)"
+        }
+        throw
+    }
 }
 function Save-State {
     param($State)
@@ -179,6 +215,7 @@ function Show-Console {
             $fullName=Get-PropertyValue $instance 'FullName' ("$($server.Server)\$($instance.InstanceName)")
             Write-Host ("  {0} | {1} | target {2} | {3}" -f $fullName,$instance.Version,$instance.TargetVersion,$instance.Edition) -ForegroundColor DarkGray
             $consoleReleaseDate=Format-ReleaseDate (Get-PropertyValue $instance 'ReleaseDate' 'Unknown');if($consoleReleaseDate-ne'Unknown'){$consoleAge=[math]::Max(0,[int](([datetime]::UtcNow.Date-[datetime]$consoleReleaseDate).TotalDays));Write-Host ("    package {0}: released {1}; age {2} day(s)" -f (Get-PropertyValue $instance 'UpdateName' ''),$consoleReleaseDate,$consoleAge) -ForegroundColor DarkGray}
+            if($State.Stage -in @('Inventory','Preparing','Applying','PostVerifying')){continue}
             foreach($backup in @($instance.Backups)){$kind=if((Get-PropertyValue $backup 'IsCopyOnly' $false)){'COPY_ONLY'}elseif($backup.LastFull-ne'NEVER'){'FULL'}else{''};$checksum=if((Get-PropertyValue $backup 'HasChecksum' $false)){'CHECKSUM'}else{''};Write-Host ("    backup {0}: {1} {2} {3}" -f $backup.Database,$backup.LastFull,$kind,$checksum) -ForegroundColor DarkGray;if((Get-PropertyValue $backup 'BackupPath' '')){Write-Host ("      {0}" -f $backup.BackupPath) -ForegroundColor DarkGray}}
             foreach($warning in @($instance.BackupWarnings)){Write-Host ("    WARNING: {0}" -f $warning) -ForegroundColor Yellow}
         }

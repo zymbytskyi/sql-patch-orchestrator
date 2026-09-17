@@ -25,4 +25,5 @@ Thumbs.db
 /src/
 /tests/*
 !/tests/Run-Tests.ps1
+!/tests/Test-WinRm.ps1
 /AGENTS.md

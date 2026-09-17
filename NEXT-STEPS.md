@@ -1,5 +1,5 @@
 # Next steps
 
-- Run production user acceptance testing of V3.0.7 from a dedicated jump server against representative standalone SQL Server 2017, 2019, 2022, and 2025 targets.
-- Confirm controller-side `TrustedHosts = *` policy is allowed by the client's security baseline.
+- Validate v3.0.8 on the affected client jump server; lab and mocked tests cannot prove client-specific domain policies or target permissions.
+- Keep runtime audit files and client inventory outside Git.
 - Keep clustered, FCI, Always On, and Availability Group orchestration outside the V3 standalone safety boundary.

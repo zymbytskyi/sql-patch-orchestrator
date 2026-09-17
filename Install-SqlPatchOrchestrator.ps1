@@ -23,7 +23,7 @@ if($resolvedPayload-ne$resolvedDestination){
     if(Test-Path $Destination){
         if(-not$Force){$answer=Read-Host "'$Destination' already exists. Replace program files and keep targets/packages/runs? [y/N]";if($answer-notmatch'^(?i:y|yes)$'){Write-Host 'Installation cancelled.';exit 0}}
     }else{New-Item -ItemType Directory -Path $Destination -Force|Out-Null}
-    foreach($name in @('Invoke-SqlPatchV3Remote.ps1','Start-SqlPatchV3Menu.ps1','README.md','SECURITY.md','LICENSE','VERSION')){Copy-Item (Join-Path $payloadRoot $name) (Join-Path $Destination $name) -Force}
+    foreach($name in @('Invoke-SqlPatchV3Remote.ps1','Start-SqlPatchV3Menu.ps1','Install-FromGitHub.ps1','README.md','SECURITY.md','LICENSE','VERSION')){Copy-Item (Join-Path $payloadRoot $name) (Join-Path $Destination $name) -Force}
     $workerDestination=Join-Path $Destination 'SqlPatchV2Local'
     New-Item -ItemType Directory -Path $workerDestination -Force|Out-Null
     Copy-Item (Join-Path $payloadRoot 'SqlPatchV2Local\*') $workerDestination -Force
