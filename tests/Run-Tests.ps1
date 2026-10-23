@@ -17,7 +17,7 @@ foreach($required in @("SchemaVersion='1.4'",'AgeDays','IsCopyOnly-is[DBNull]','
 if($engine-match[regex]::Escape('Join-Path $RunRoot $Cycle')){$failures.Add('Free-form cycle label is used directly as a filesystem path.')}
 foreach($required in @("database_id IN (1,3,4)",'WITH COPY_ONLY, CHECKSUM','RESTORE VERIFYONLY FROM DISK','Created $created of $expected required backup(s)','xp_instance_regread','^Enterprise Edition')){if($worker-notmatch[regex]::Escape($required)){$failures.Add("Backup behavior missing: $required")}}
 if($worker-match[regex]::Escape('Backup ''$path'' was not found.')){$failures.Add('Backup incorrectly requires the remoting DBA to have NTFS read access to the SQL-owned backup file.')}
-if($version-ne'3.1.0'-or$readme-notmatch'v3\.1\.0'){$failures.Add('Version, README, and release tag are inconsistent.')}
+if($version-ne'3.1.1'-or$readme-notmatch'v3\.1\.1'){$failures.Add('Version, README, and release tag are inconsistent.')}
 if($menu-match'Get-Credential|Request-RemoteCredential'){$failures.Add('Menu still prompts for an alternate credential.')}
 $installerText=Get-Content (Join-Path $root 'Install-FromGitHub.ps1') -Raw
 foreach($text in @($menu,$engine,$worker,$installerText)){if($text-match[regex]::Escape('Start-MpScan')){$failures.Add('An explicit blocking Microsoft Defender custom scan remains in an operational script.')}}
@@ -51,8 +51,10 @@ Write-Output '[PASS] Exact system-only COPY_ONLY, CHECKSUM, and VERIFYONLY backu
 Write-Output '[PASS] SQL Server 2017 backup-path fallback and time-zone-safe backup age evidence.'
 & (Join-Path $PSScriptRoot 'Test-WinRm.ps1')
 if($LASTEXITCODE-ne0){exit 1}
-foreach($suite in @('Test-Parallel.ps1','Test-Transfer.ps1','Test-Apply.ps1','Test-Smb.ps1','Test-Readiness.ps1','Test-Latest.ps1','Test-Menu.ps1')){
+foreach($suite in @('Test-Parallel.ps1','Test-Transfer.ps1','Test-Apply.ps1','Test-Smb.ps1','Test-Readiness.ps1','Test-Latest.ps1','Test-Updater.ps1','Test-Menu.ps1')){
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot $suite)
     if($LASTEXITCODE-ne0){exit 1}
 }
 Write-Output 'Tests: PASS'
+
+

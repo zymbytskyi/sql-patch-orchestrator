@@ -1,3 +1,9 @@
+## 3.1.1 — 2026-10-23
+
+- Select the latest released CU-branch security update instead of the base CU, in both V3 and the bundled V2 worker. Fail closed on missing/ambiguous metadata.
+- Add commit-pinned program updater with Git blob verification, backups and rollback; preserve targets, packages and runs.
+- Re-run Prepare after upgrading to replace previously selected media. No SQL installation is started by the updater.
+
 # SQL Patch Orchestrator V3.1.0
 
 - Bounded parallel distribution (3 hosts) and standalone Apply (2 hosts), configurable independently.
@@ -13,3 +19,4 @@
 - Cross-VM SMB transfer of a 490 MB package, target SHA-256, and already-present reuse passed. This is not a WAN throughput guarantee.
 - Latest-CU lookup rejects disagreement between Microsoft Download Center and build history; reviewed local media remains available.
 - All menu routes are regression-tested, including system backups, cycle switching and pauses. ZIP upgrades must be extracted separately before installation.
+

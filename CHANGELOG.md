@@ -1,3 +1,9 @@
+## 3.1.1 — 2026-10-23
+
+- Select the latest released CU-branch security update instead of the base CU, in both V3 and the bundled V2 worker. Fail closed on missing/ambiguous metadata.
+- Add commit-pinned program updater with Git blob verification, backups and rollback; preserve targets, packages and runs.
+- Re-run Prepare after upgrading to replace previously selected media. No SQL installation is started by the updater.
+
 # Changelog
 
 ## 3.1.0 - 2026-09-17
@@ -73,3 +79,4 @@
 ## 3.0.0 - 2026-08-18
 
 - Initial public V3 release for remote standalone SQL Server patch orchestration.
+

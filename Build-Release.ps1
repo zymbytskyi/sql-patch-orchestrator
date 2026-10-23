@@ -1,7 +1,7 @@
 <# .SYNOPSIS Builds a ZIP with a top-level SqlPatchOrchestrator folder. #>
 #Requires -Version 5.1
 [CmdletBinding()]
-param([ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version='3.1.0',[string]$OutputDirectory)
+param([ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version='3.1.1',[string]$OutputDirectory)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 if([string]::IsNullOrWhiteSpace($OutputDirectory)){$OutputDirectory=Join-Path $PSScriptRoot 'Release'}
@@ -16,7 +16,7 @@ try{
     Copy-Item (Join-Path $PSScriptRoot 'SqlPatchV2Local') $payloadRoot -Recurse
     New-Item -ItemType Directory -Path (Join-Path $payloadRoot 'Packages'),(Join-Path $payloadRoot 'Runs') -Force|Out-Null
     New-Item -ItemType File -Path (Join-Path $payloadRoot 'Packages\.gitkeep'),(Join-Path $payloadRoot 'Runs\.gitkeep') -Force|Out-Null
-    $manifestNames=@($files+@('SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1','SqlPatchV2Local\README.md'))
+    $manifestNames=@($files+@('SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1','SqlPatchV2Local\SqlPatchUpdates.ps1','SqlPatchV2Local\README.md'))
     $manifestLines=foreach($name in $manifestNames){'{0} *{1}'-f(Get-FileHash (Join-Path $payloadRoot $name) -Algorithm SHA256).Hash,$name}
     [IO.File]::WriteAllLines((Join-Path $payloadRoot 'manifest.sha256'),$manifestLines,(New-Object Text.UTF8Encoding($false)))
     New-Item -ItemType Directory -Path $OutputDirectory -Force|Out-Null
@@ -25,3 +25,4 @@ try{
     Compress-Archive -LiteralPath $payloadRoot -DestinationPath $zipPath -CompressionLevel Optimal
     Write-Output $zipPath
 }finally{if(Test-Path $buildRoot){Remove-Item -LiteralPath $buildRoot -Recurse -Force}}
+

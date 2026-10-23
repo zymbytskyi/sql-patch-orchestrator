@@ -371,7 +371,7 @@ function Get-PackageReleaseMetadata {
         $cu=[regex]::Match($matchingRow,'\bCU\d+\b','IgnoreCase');$dateMatch=[regex]::Match($matchingRow,'\b[A-Z][a-z]+ \d{1,2}, \d{4}\b')
         if(-not$cu.Success-or-not$dateMatch.Success){throw "CU name or release date was missing from the Microsoft Learn row for $Version / $kb."}
         $date=[datetime]::ParseExact($dateMatch.Value,'MMMM d, yyyy',[Globalization.CultureInfo]::GetCultureInfo('en-US')).ToString('yyyy-MM-dd')
-        $record=[pscustomobject]@{SchemaVersion=2;FileName=$fileName;Major=$Major;Version=$Version;KB=$kb;UpdateName=$cu.Value.ToUpperInvariant();ReleaseDate=$date;Source=$buildHistoryPages[$Major]}
+        $record=[pscustomobject]@{SchemaVersion=2;FileName=$fileName;Major=$Major;Version=$Version;KB=$kb;UpdateName=$(if($matchingRow -match '(?i)GDR'){$cu.Value.ToUpperInvariant()+' + GDR'}else{$cu.Value.ToUpperInvariant()});ReleaseDate=$date;Source=$buildHistoryPages[$Major]}
         $updated=@($cached|Where-Object{$_.FileName-ne$fileName-or$_.Version-ne$Version})+$record
         [IO.File]::WriteAllText($cachePath,($updated|ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
         [pscustomobject]@{UpdateName=$record.UpdateName;ReleaseDate=$date;PackageAgeDays=[math]::Max(0,[int](([datetime]::UtcNow.Date-[datetime]::ParseExact($date,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)).TotalDays));MetadataSource='Microsoft Learn build history'}
@@ -380,44 +380,17 @@ function Get-PackageReleaseMetadata {
         [pscustomobject]@{UpdateName=if($kb){$kb}else{'Local update'};ReleaseDate='Unknown';PackageAgeDays='Unknown';MetadataSource='Unknown (offline/local media)'}
     }
 }
-function Assert-LatestCuMetadata {
-    param([int]$Major,[string]$Version,[string]$KB)
-    $history=Invoke-WebRequest -Uri $buildHistoryPages[$Major] -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
-    $latest=$null
-    foreach($row in [regex]::Matches([string]$history.Content,'<tr[^>]*>[\s\S]*?</tr>','IgnoreCase')){
-        $plain=[Net.WebUtility]::HtmlDecode([regex]::Replace($row.Value,'<[^>]+>',' '))
-        $plain=[regex]::Replace($plain,'\s+',' ').Trim()
-        $match=[regex]::Match($plain,('^CU\d+\s+\(Latest\)\s+({0}\.0\.\d+\.\d+)\b.*?\b(KB\d+)\b'-f$Major),'IgnoreCase')
-        if($match.Success){$latest=$match;break}
-    }
-    if(-not$latest){throw 'Could not verify the latest CU against Microsoft build history. Use reviewed local media instead.'}
-    if([version]$Version-ne[version]$latest.Groups[1].Value-or$KB-ne$latest.Groups[2].Value){
-        throw "Microsoft sources disagree: Download Center offers $KB ($Version), but build history lists $($latest.Groups[2].Value) ($($latest.Groups[1].Value)). No latest package was approved. Use reviewed local media or retry later."
-    }
-}
 function Get-LatestUpdateForMajor {
     param([int]$Major)
-    $year=$supported[$Major];$page=$downloadPages[$Major]
-    [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-    $response=Get-MicrosoftDownloadPage -Uri $page
-    $html=[Net.WebUtility]::HtmlDecode([string]$response.Content)
-    $plain=[regex]::Replace($html,'<script[\s\S]*?</script>|<style[\s\S]*?</style>|<[^>]+>',' ');$plain=[regex]::Replace($plain,'\s+',' ')
-    $filePattern="SQLServer$year-KB\d+-x64\.exe";$fileMatch=[regex]::Match($plain,$filePattern,'IgnoreCase')
-    $versionMatch=[regex]::Match($plain,"Version:\s*($Major\.0\.\d+\.\d+)",'IgnoreCase')
-    $cuMatch=[regex]::Match($plain,"Cumulative Update Package\s+(\d+)(?:\s+Azure Connect Pack)?\s+for SQL Server $year\s+-\s+(KB\d+)",'IgnoreCase')
-    $urls=@($response.Links|ForEach-Object{if($_.PSObject.Properties.Name-contains'href'){[string]$_.href}}|Where-Object{$_-match"^https://download\.microsoft\.com/.*/$filePattern(?:\?.*)?$"})
-    if(-not$urls.Count){$urlMatch=[regex]::Match($html,('https://download\.microsoft\.com/[^"''\s<>]+/{0}(?:\?[^"''\s<>]*)?'-f$filePattern),'IgnoreCase');if($urlMatch.Success){$urls=@($urlMatch.Value)}}
-    if(-not$fileMatch.Success-or-not$versionMatch.Success-or-not$cuMatch.Success-or-not$urls.Count){throw "Could not read the latest SQL Server $year CU from Microsoft Download Center. Use reviewed local media instead."}
-    $uri=[uri]$urls[0];if($uri.Scheme-ne'https'-or$uri.Host-ne'download.microsoft.com'){throw "Unexpected Microsoft download URL '$uri'."}
-    Assert-LatestCuMetadata -Major $Major -Version $versionMatch.Groups[1].Value -KB $cuMatch.Groups[2].Value
-    [pscustomobject]@{Major=$Major;Year=$year;Name="CU$($cuMatch.Groups[1].Value)";KB=$cuMatch.Groups[2].Value.ToUpperInvariant();Version=$versionMatch.Groups[1].Value;FileName=$fileMatch.Value;Uri=$uri.AbsoluteUri}
+    . (Join-Path $V2SourcePath 'SqlPatchUpdates.ps1')
+    Get-LatestSqlSecurityUpdate -Major $Major
 }
 function Get-LatestPackageMap {
     param($State)
     if(-not(Test-Path -LiteralPath $PackageRoot)){New-Item -ItemType Directory -Path $PackageRoot -Force|Out-Null}
     $map=@{};$majors=@($State.Servers|ForEach-Object Instances|ForEach-Object Major|Sort-Object -Unique)
     foreach($major in $majors){
-        $update=Get-LatestUpdateForMajor -Major ([int]$major);Write-Host "Latest SQL Server $($update.Year): $($update.Name) $($update.KB), build $($update.Version)" -ForegroundColor Cyan
+        $update=Get-LatestUpdateForMajor -Major ([int]$major);Write-Host "Latest CU-branch security update for SQL Server $($update.Year): $($update.Name) $($update.KB), build $($update.Version)" -ForegroundColor Cyan
         $destination=Join-Path $PackageRoot $update.FileName
         if(-not(Test-Path -LiteralPath $destination -PathType Leaf)){
             $partial=$destination+'.download';Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
@@ -700,3 +673,4 @@ try {
 }
 catch{Write-Host ("FAILED: "+$_.Exception.Message) -ForegroundColor Red;exit 1}
 finally{if($lockHeld){$engineMutex.ReleaseMutex()};$engineMutex.Dispose()}
+

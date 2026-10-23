@@ -6,7 +6,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $sourceRoot=$PSScriptRoot
 $payloadRoot=if(Test-Path (Join-Path $sourceRoot 'SqlPatchOrchestrator') -PathType Container){Join-Path $sourceRoot 'SqlPatchOrchestrator'}else{$sourceRoot}
-$required=@('Invoke-SqlPatchV3Remote.ps1','SqlPatchParallel.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1','README.md','LICENSE')
+$required=@('Invoke-SqlPatchV3Remote.ps1','SqlPatchParallel.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1','SqlPatchV2Local\SqlPatchUpdates.ps1','README.md','LICENSE')
 foreach($name in $required){if(-not(Test-Path (Join-Path $payloadRoot $name) -PathType Leaf)){throw "Package file '$name' is missing."}}
 $manifest=Join-Path $payloadRoot 'manifest.sha256'
 if(Test-Path $manifest -PathType Leaf){
@@ -33,3 +33,4 @@ if($resolvedPayload-ne$resolvedDestination){
 New-Item -ItemType Directory -Path (Join-Path $Destination 'Packages'),(Join-Path $Destination 'Runs') -Force|Out-Null
 Write-Host "Installed SQL Patch Orchestrator V3 to '$resolvedDestination'." -ForegroundColor Green
 Write-Host "Run: cd $resolvedDestination; .\Start-SqlPatchV3Menu.ps1"
+

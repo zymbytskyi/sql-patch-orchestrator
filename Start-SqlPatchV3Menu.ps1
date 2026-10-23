@@ -66,7 +66,7 @@ try{while($true){
     Write-Host ("Remote account: {0}" -f $(if($common.ContainsKey('Credential')){$common.Credential.UserName}else{[Security.Principal.WindowsIdentity]::GetCurrent().Name+' (current Windows account)'}))
     Write-Host '1. Open target list (SERVER or SERVER\INSTANCE)'
     Write-Host '2. Inventory, backup review, and optional COPY_ONLY backup'
-    Write-Host '3. Choose/download latest CUs, verify, and distribute (NO INSTALL)'
+    Write-Host '3. Choose/download latest security updates, verify, and distribute (NO INSTALL)'
     Write-Host '4. Check readiness per host (READ ONLY)'
     Write-Host '5. Apply with bounded parallelism (controller last)'
     Write-Host '6. Post-patch verification (READ ONLY)'
@@ -104,7 +104,7 @@ try{while($true){
                 $inventoryState=Get-CycleState
                 if(-not$inventoryState-or$inventoryState.Stage-notin@('InventoryReady','Prepared','PreflightReady','PrepareFailed','PreflightBlocked')){Show-InventoryBlockers $inventoryState;Pause-Menu;continue}
                 Write-Host '1. Use reviewed Microsoft EXEs already in Packages (default)'
-                Write-Host '2. Download latest CUs from Microsoft automatically'
+                Write-Host '2. Download latest CU-branch security updates from Microsoft automatically'
                 $source=Read-Host 'Select [1]';if([string]::IsNullOrWhiteSpace($source)){$source='1'}
                 if($Transport-ne'PowerShellDirect'){
                     Write-Host 'Transfer: 1 SMB/Robocopy (recommended), 2 PowerShell (slower fallback)'
@@ -137,3 +137,4 @@ try{while($true){
     catch{Write-Host "FAILED: $($_.Exception.Message)" -ForegroundColor Red;Pause-Menu}
 }}
 finally{if($common.ContainsKey('Credential')){$common.Remove('Credential')};$Credential=$null;$menuMutex.ReleaseMutex();$menuMutex.Dispose()}
+
