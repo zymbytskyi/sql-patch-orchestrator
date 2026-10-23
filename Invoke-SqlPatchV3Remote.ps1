@@ -383,14 +383,14 @@ function Get-PackageReleaseMetadata {
 function Get-LatestUpdateForMajor {
     param([int]$Major)
     . (Join-Path $V2SourcePath 'SqlPatchUpdates.ps1')
-    Get-LatestSqlSecurityUpdate -Major $Major
+    Get-LatestSqlUpdate -Major $Major
 }
 function Get-LatestPackageMap {
     param($State)
     if(-not(Test-Path -LiteralPath $PackageRoot)){New-Item -ItemType Directory -Path $PackageRoot -Force|Out-Null}
     $map=@{};$majors=@($State.Servers|ForEach-Object Instances|ForEach-Object Major|Sort-Object -Unique)
     foreach($major in $majors){
-        $update=Get-LatestUpdateForMajor -Major ([int]$major);Write-Host "Latest CU-branch security update for SQL Server $($update.Year): $($update.Name) $($update.KB), build $($update.Version)" -ForegroundColor Cyan
+        $update=Get-LatestUpdateForMajor -Major ([int]$major);Write-Host "Latest CU-branch update (CU or security) for SQL Server $($update.Year): $($update.Name) $($update.KB), build $($update.Version)" -ForegroundColor Cyan
         $destination=Join-Path $PackageRoot $update.FileName
         if(-not(Test-Path -LiteralPath $destination -PathType Leaf)){
             $partial=$destination+'.download';Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue

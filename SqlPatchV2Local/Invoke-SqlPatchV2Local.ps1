@@ -204,7 +204,7 @@ function Invoke-OptionalBackups {
 function Get-LatestUpdate {
     param($Instance)
     . (Join-Path $PSScriptRoot 'SqlPatchUpdates.ps1')
-    Get-LatestSqlSecurityUpdate -Major ([int]$Instance.Major)
+    Get-LatestSqlUpdate -Major ([int]$Instance.Major)
 }
 
 function Get-LatestPackage {
@@ -248,15 +248,15 @@ try {
     Invoke-OptionalBackups -Instance $instance -SelectedChoice $BackupChoice
     if ($BackupOnly) { Write-Host 'Backup-only operation complete. No update was selected or installed.' -ForegroundColor Green; exit 0 }
     Write-Step '5. Update'
-    Write-Host '1. Latest Microsoft CU-branch security update (default)'
+    Write-Host '1. Latest Microsoft CU-branch update (CU or security) (default)'
     Write-Host "2. Another local $($products[[int]$instance.Major].Product) update .exe"
     $choice = if ([string]::IsNullOrWhiteSpace($LocalPackagePath)) { Read-Host 'Select [1]' } else { '2' }
     if ([string]::IsNullOrWhiteSpace($choice)) { $choice = '1' }
     $downloadedByScript = $false
     if ($choice -eq '1') {
         $latest = Get-LatestUpdate -Instance $instance
-        Write-Host "Latest security update: $($latest.Name) | $($latest.KB) | build $($latest.Version)"
-        if ([version]$instance.Version -ge [version]$latest.Version) { Write-Host "Already at or above latest security-update build: $($instance.Version)." -ForegroundColor Green; exit 0 }
+        Write-Host "Latest update: $($latest.Name) | $($latest.KB) | build $($latest.Version)"
+        if ([version]$instance.Version -ge [version]$latest.Version) { Write-Host "Already at or above latest update build: $($instance.Version)." -ForegroundColor Green; exit 0 }
         $package = Get-LatestPackage -Update $latest
         $downloadedByScript = $true
     }
@@ -265,7 +265,7 @@ try {
     }
     else { throw "Unknown update selection '$choice'." }
     Test-UpdatePackage -Path $package -Instance $instance
-    if($downloadedByScript-and[version](Get-Item -LiteralPath $package).VersionInfo.ProductVersion-ne[version]$latest.Version){throw 'Downloaded security update build does not match Microsoft metadata.'}
+    if($downloadedByScript-and[version](Get-Item -LiteralPath $package).VersionInfo.ProductVersion-ne[version]$latest.Version){throw 'Downloaded update build does not match Microsoft metadata.'}
     Write-Host "Selected instance: $($instance.DisplayName)"
     Write-Host "Installed build:  $($instance.Version)"
     Write-Host "Update package:   $package"

@@ -1,3 +1,9 @@
+## 3.1.2
+
+- Automatic selection now chooses the highest released CU-branch build, whether CU or CU + GDR, within the installed SQL major.
+- Menu labels clarify CU-or-security selection; Update Catalog supports cumulative update titles as well as security titles.
+- Added regression coverage for newer CUs, later security releases on older CU branches, RTM/GDR exclusion, and base-CU catalog resolution.
+
 ## 3.1.1 — 2026-10-23
 
 - Select the latest released CU-branch security update instead of the base CU, in both V3 and the bundled V2 worker. Fail closed on missing/ambiguous metadata.

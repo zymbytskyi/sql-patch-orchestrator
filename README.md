@@ -1,4 +1,4 @@
-# SQL Patch Orchestrator V3.1.1
+# SQL Patch Orchestrator V3.1.2
 
 ## Open the menu — existing installation
 
@@ -26,7 +26,7 @@ Supports standalone SQL Server **2017, 2019, 2022, and 2025**, including **Expre
 - [Install on a new controller or update an existing installation](#install-on-a-new-controller-or-update-an-existing-installation)
 - [Configure the target scope](#configure-the-target-scope)
 - [Start the menu](#start-the-menu)
-- [Prepare the latest security updates](#prepare-the-latest-security-updates)
+- [Prepare the latest updates (CU or security)](#prepare-the-latest-updates-cu-or-security)
 - [Apply during the maintenance window](#apply-during-the-maintenance-window)
 - [Menu reference](#menu-reference)
 - [Files, evidence, and recovery](#files-evidence-and-recovery)
@@ -50,7 +50,7 @@ No Git installation or repository clone is required on the controller. Install t
 
 ## Install on a new controller or update an existing installation
 
-The same bootstrap handles both cases. It installs the reviewed **v3.1.1** program commit below, not an unreviewed moving branch. It downloads and verifies program files, preserves existing scope/media/run data, and backs up replaced program files.
+The same bootstrap handles both cases. It installs the reviewed **v3.1.2** program commit below, not an unreviewed moving branch. It downloads and verifies program files, preserves existing scope/media/run data, and backs up replaced program files.
 
 For an existing installation, close all orchestrator menus and finish active operations first. Set **$destination** to the existing installation folder. The updater rejects an open menu or detected active patch process.
 
@@ -82,7 +82,7 @@ if ($LASTEXITCODE -ne 0) {
 Get-Content -LiteralPath (Join-Path $destination 'VERSION')
 ```
 
-Expected result: version **3.1.1**, the installed commit, and a **ProgramBackups** path. No SQL installation or reboot starts here.
+Expected result: version **3.1.2**, the installed commit, and a **ProgramBackups** path. No SQL installation or reboot starts here.
 
 - **New installation:** creates program files, Packages, Runs, and a comment-only targets.txt. Add your approved targets next.
 - **Existing installation:** keeps targets.txt, Packages, and Runs. Program files are backed up before replacement.
@@ -135,7 +135,7 @@ Change the path if you installed elsewhere. This command starts the menu; it doe
 
 Set the descriptive cycle name in the command's `-Cycle` argument. Use the same name to resume that campaign. Separate groups should have separate cycle names. The command passes the name directly, so there is no startup cycle-name question before the menu. Option 8 can still switch cycles interactively in the new console. This launch command explicitly limits Apply to **one host at a time**; the script's default when omitted is two.
 
-## Prepare the latest security updates
+## Prepare the latest updates (CU or security)
 
 Preparation can be completed before the approved downtime window.
 
@@ -144,7 +144,7 @@ Preparation can be completed before the approved downtime window.
    - At the backup prompt, **0** (default) creates no new backup.
    - **1** creates COPY_ONLY + CHECKSUM backups of master, model, and msdb on selected instances, followed by RESTORE VERIFYONLY. This is a write operation and consumes disk space. It excludes tempdb and user databases.
    - Backup warnings are informational. They do not prove that recovery prerequisites are satisfied.
-3. **Option 3 — Choose/download updates:** at the package-source prompt, explicitly choose **2 — Download latest CU-branch security updates from Microsoft automatically**.
+3. **Option 3 — Choose/download updates:** at the package-source prompt, explicitly choose **2 — Download latest CU-branch updates (CU or security) from Microsoft automatically**.
    - Pressing Enter chooses **1 — Use reviewed EXEs already in Packages**. It does **not** request a fresh automatic selection.
    - At the transfer prompt, choose **1 — SMB/Robocopy** (default), or explicitly choose **2 — PowerShell** if that transport is required.
    - Wait for download, package verification, distribution, and target hash verification to finish. This phase does not install SQL updates.
@@ -153,7 +153,7 @@ Preparation can be completed before the approved downtime window.
 
 **Automatic download shortcut: 2 → 3 → source 2 → transfer 1 → 4 → 7.**
 
-Automatic selection targets the latest released **CU + GDR security update** for each SQL major. It is not a selector for the latest base CU or the RTM/GDR-only branch. The selection and verification rules are described below.
+Automatic selection chooses the **highest released build in the CU branch: CU or CU + GDR**, for the installed SQL major. A newer CU supersedes an older security build; a higher security build supersedes its base CU. It never upgrades SQL Server 2022 to 2025 and excludes RTM/GDR-only packages. A later release date on an older branch does not override a higher build.
 
 Inventory and other remote phases may add a specific target to the controller's WinRM TrustedHosts after a matching implicit-credentials error. Existing entries are preserved, the change is logged, and the connection is retried once. An actual “Access is denied” is not fixed this way. Domain policy may require administrator intervention.
 
@@ -243,7 +243,7 @@ Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powersh
 
 Concurrent Apply means concurrent downtime on independent targets. Start with `ApplyConcurrency 1` if application dependencies require serial maintenance. Distribution limits do not change SQL/backup/signature/standalone safety checks. On 2026-09-17, real parallel SQL 2022 Express/Developer CU27 installation, remote reboots, and post-verification passed on two lab hosts. SQL 2025 was verified as an already-current selected package and was not reinstalled. SQL 2017/2019 and Standard/Enterprise production editions were not live-patched in this acceptance run; validate your own environment before production.
 
-Automatic selection reads Microsoft's complete build history and chooses the newest released **CU + GDR security update** for each SQL major, ordered by release date then build. Pure RTM/GDR and base CU rows are excluded. It verifies the KB/build pairing, follows that KB's Microsoft Download Center link or resolves the exact CU package through Microsoft Update Catalog, and selects only the exact Microsoft EXE. Missing or conflicting metadata stops preparation; there is no silent base-CU fallback. Microsoft signature, package build and transfer SHA-256 checks remain required. This mode targets the CU servicing branch; review applicability before changing a GDR-only baseline. A newer base CU is not selected by this security-only mode. Instances already above the selected security build are not downgraded.
+Automatic selection reads [Microsoft's complete build history](https://support.microsoft.com/en-us/servicing/sql/kb321185-download-and-install-latest-updates), filters released CU and CU + GDR rows to the installed SQL major, and orders by numeric build descending, then release date. Future-dated releases and RTM/GDR-only rows are excluded. It verifies the KB/build pairing and resolves the exact Microsoft EXE through Download Center or Update Catalog. Missing/conflicting metadata stops preparation. Microsoft signature, package build and transfer SHA-256 checks remain required. Instances already above the selected build are not downgraded. Review applicability before changing a GDR-only baseline.
 
 As of 2026-10-23, SQL 2022 resolves to KB5126934 / 16.0.4305.5 and SQL 2019 to KB5128494 / 15.0.4500.2. These are examples, not hardcoded selections. Review each update's known issues before approving Apply.
 
