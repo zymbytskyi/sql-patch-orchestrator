@@ -5,10 +5,12 @@
 Open **Windows PowerShell as Administrator** and paste this single command:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\SqlPatchOrchestrator\Start-SqlPatchV3Menu.ps1" -ApplyConcurrency 1
+Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WindowStyle Normal -ArgumentList '-NoExit -NoProfile -ExecutionPolicy Bypass -File "C:\SqlPatchOrchestrator\Start-SqlPatchV3Menu.ps1" -Cycle "Production Standard October 2026" -ApplyConcurrency 1'
 ```
 
-This opens the interactive menu. It does not install SQL updates or restart servers. Enter the existing cycle name to continue that campaign, or a new name for a separate campaign.
+This opens a **separate, visible, elevated console** with menu options 0–8. Accept the Windows elevation prompt if shown. It does not install SQL updates or restart servers. Replace `Production Standard October 2026` with your campaign name before running: use the exact existing name to resume, or a new name for a separate campaign.
+
+Use this launcher from PowerShell or PowerShell ISE. The previous inline child-process command was reported to remain at “Running” without displaying the menu; this separate-window command was confirmed to work by the operator. Passing `-Cycle` bypasses the startup cycle-name prompt, and `-NoExit` keeps the new console open if an error occurs. Do not launch another copy while patch operations are active.
 
 The command works from any current directory. If you installed into a different folder (for example, a `SqlPatchOrchestrator-Clean-...` folder), replace `C:\SqlPatchOrchestrator` with that exact installation path. If the script is missing because the installation was removed, complete the installation section below first.
 
@@ -126,14 +128,12 @@ For a different group of servers, save the new target list and create a **separa
 Run from an elevated Windows PowerShell window:
 
 ```powershell
-& powershell.exe -NoProfile -ExecutionPolicy Bypass `
-    -File 'C:\SqlPatchOrchestrator\Start-SqlPatchV3Menu.ps1' `
-    -ApplyConcurrency 1
+Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WindowStyle Normal -ArgumentList '-NoExit -NoProfile -ExecutionPolicy Bypass -File "C:\SqlPatchOrchestrator\Start-SqlPatchV3Menu.ps1" -Cycle "Production Standard October 2026" -ApplyConcurrency 1'
 ```
 
 Change the path if you installed elsewhere. This command starts the menu; it does not start SQL installation.
 
-Enter a descriptive cycle name, for example **Production Standard October 2026**. Use the same name to resume that campaign. Pressing Enter uses the suggested month. Separate groups should have separate cycle names. This launch command explicitly limits Apply to **one host at a time**; the script's default when omitted is two.
+Set the descriptive cycle name in the command's `-Cycle` argument. Use the same name to resume that campaign. Separate groups should have separate cycle names. The command passes the name directly, so there is no startup cycle-name question before the menu. Option 8 can still switch cycles interactively in the new console. This launch command explicitly limits Apply to **one host at a time**; the script's default when omitted is two.
 
 ## Prepare the latest security updates
 
@@ -210,6 +210,7 @@ Do not commit customer targets, update EXEs, backups, credentials, or run logs t
 | Symptom | Next action |
 |---|---|
 | Git is not recognized | Git is not required. Use the installation bootstrap above. |
+| ISE/host shows “Running” but no menu | If you only launched the menu and did not start Apply, stop that menu-only attempt. Use the separate-window `Start-Process` command at the top of this README with an explicit `-Cycle`. Look for the new console and any elevation prompt. Do not terminate an active SQL installation. |
 | Script execution is blocked | Use the documented powershell.exe launch command with process-scoped ExecutionPolicy Bypass. Domain policy may still require administrator action. |
 | Updater says a menu/operation is active | Finish the operation and close its menu, then rerun the updater. |
 | GitHub download, API, or hash check fails | Stop; check HTTPS/proxy access and GitHub rate limits. Keep the commit/hash pair unchanged. |
@@ -229,7 +230,7 @@ Defaults: **3 concurrent copies**, **2 concurrent target hosts in Apply**, and a
 
 ```powershell
 # Lower limits for a busy SQL/jump server or a slow shared WAN link:
-.\Start-SqlPatchV3Menu.ps1 -CopyConcurrency 2 -ApplyConcurrency 1 -CopyLimitMBps 10
+Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WindowStyle Normal -ArgumentList '-NoExit -NoProfile -ExecutionPolicy Bypass -File "C:\SqlPatchOrchestrator\Start-SqlPatchV3Menu.ps1" -Cycle "Production Standard October 2026" -CopyConcurrency 2 -ApplyConcurrency 1 -CopyLimitMBps 10'
 ```
 
 - New work waits when controller CPU is at least 75% or available RAM is below 2 GiB. After five minutes, queued work is deferred. Already running SQL Setup is never killed to reduce load. These are admission checks, not reserved resources or a guarantee against load spikes.
