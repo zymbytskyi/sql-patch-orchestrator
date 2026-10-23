@@ -1,5 +1,19 @@
 # SQL Patch Orchestrator V3.1.1
 
+## Open the menu — existing installation
+
+Open **Windows PowerShell as Administrator** and paste this single command:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\SqlPatchOrchestrator\Start-SqlPatchV3Menu.ps1" -ApplyConcurrency 1
+```
+
+This opens the interactive menu. It does not install SQL updates or restart servers. Enter the existing cycle name to continue that campaign, or a new name for a separate campaign.
+
+The command works from any current directory. If you installed into a different folder (for example, a `SqlPatchOrchestrator-Clean-...` folder), replace `C:\SqlPatchOrchestrator` with that exact installation path. If the script is missing because the installation was removed, complete the installation section below first.
+
+The installation bootstrap does **not** open the menu automatically. Run the command above after installation, and whenever you need to reopen the menu.
+
 Install on one **controller** (an administration/jump server), define the approved SQL instances, prepare Microsoft updates, and apply them during the maintenance window.
 
 Supports standalone SQL Server **2017, 2019, 2022, and 2025**, including **Express, Standard, Developer, and Enterprise** editions. WSFC, FCI, Always On, and Availability Group targets are blocked before distribution or installation.
