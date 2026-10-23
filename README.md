@@ -58,7 +58,7 @@ Open **Windows PowerShell as Administrator**, then paste:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$commit = '0c4a50ca529379667053e46767d3664560a209e7'
+$commit = 'eab20fd7368bc5755686d94063fffe0167c9e3d2'
 $destination = 'C:\SqlPatchOrchestrator'
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -89,7 +89,7 @@ Expected result: version **3.1.2**, the installed commit, and a **ProgramBackups
 - If file replacement or verification fails, the updater attempts to restore the previous program files and reports the error.
 - The old v3.1.0 release installer still installs v3.1.0. Use the bootstrap above for this version.
 - The commit and SHA-256 form a matched pair. Do not change just one. A future program release needs its own reviewed commit and updater hash.
-- This pinned commit predates this expanded README; the current GitHub README is the installation guide.
+- The current GitHub README contains the authoritative bootstrap pin; an installed README may contain an older bootstrap pin.
 
 After updating an existing campaign, rerun **Inventory** and **Prepare with source 2**. Updating program files alone does not replace packages already selected in saved run state.
 
