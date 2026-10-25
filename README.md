@@ -58,7 +58,7 @@ Open **Windows PowerShell as Administrator**, then paste:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$commit = 'eab20fd7368bc5755686d94063fffe0167c9e3d2'
+$commit = 'c9bd929b859bf7543690a896956f0c06d559d6f3'
 $destination = 'C:\SqlPatchOrchestrator'
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
