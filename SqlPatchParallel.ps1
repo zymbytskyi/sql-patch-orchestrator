@@ -111,6 +111,8 @@ function Invoke-ParallelPhase {
         if($Phase-eq'Apply'-and$entry.Status-eq'Complete'){continue}
         $queue.Enqueue($entry)
     }
+    # Zero removes the fixed Apply cap; completed and local hosts are not counted.
+    if($Phase-eq'Apply'-and$ApplyConcurrency-eq0){$limit=[math]::Max(1,$queue.Count)}
     # Controller SQL is always last and never automatically rebooted.
     $local=@($State.Servers|Where-Object {Get-PropertyValue $_ IsController $false})
     $running=New-Object Collections.ArrayList

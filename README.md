@@ -1,11 +1,11 @@
-# SQL Patch Orchestrator V3.1.2
+# SQL Patch Orchestrator V3.1.3
 
 ## Open the menu — existing installation
 
 Open **Windows PowerShell as Administrator** and paste this single command:
 
 ```powershell
-Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WindowStyle Normal -ArgumentList '-NoExit -NoProfile -ExecutionPolicy Bypass -File "C:\SqlPatchOrchestrator\Start-SqlPatchV3Menu.ps1" -Cycle "Production Standard October 2026" -ApplyConcurrency 1'
+Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WindowStyle Normal -ArgumentList '-NoExit -NoProfile -ExecutionPolicy Bypass -File "C:\SqlPatchOrchestrator\Start-SqlPatchV3Menu.ps1" -Cycle "Production Standard October 2026" -ApplyConcurrency 0'
 ```
 
 This opens a **separate, visible, elevated console** with menu options 0–8. Accept the Windows elevation prompt if shown. It does not install SQL updates or restart servers. Replace `Production Standard October 2026` with your campaign name before running: use the exact existing name to resume, or a new name for a separate campaign.
@@ -50,7 +50,7 @@ No Git installation or repository clone is required on the controller. Install t
 
 ## Install on a new controller or update an existing installation
 
-The same bootstrap handles both cases. It installs the reviewed **v3.1.2** program commit below, not an unreviewed moving branch. It downloads and verifies program files, preserves existing scope/media/run data, and backs up replaced program files.
+The same bootstrap handles both cases. It installs the reviewed **v3.1.3** program commit below, not an unreviewed moving branch. It downloads and verifies program files, preserves existing scope/media/run data, and backs up replaced program files.
 
 For an existing installation, close all orchestrator menus and finish active operations first. Set **$destination** to the existing installation folder. The updater rejects an open menu or detected active patch process.
 
@@ -82,7 +82,7 @@ if ($LASTEXITCODE -ne 0) {
 Get-Content -LiteralPath (Join-Path $destination 'VERSION')
 ```
 
-Expected result: version **3.1.2**, the installed commit, and a **ProgramBackups** path. No SQL installation or reboot starts here.
+Expected result: version **3.1.3**, the installed commit, and a **ProgramBackups** path. No SQL installation or reboot starts here.
 
 - **New installation:** creates program files, Packages, Runs, and a comment-only targets.txt. Add your approved targets next.
 - **Existing installation:** keeps targets.txt, Packages, and Runs. Program files are backed up before replacement.
@@ -128,12 +128,12 @@ For a different group of servers, save the new target list and create a **separa
 Run from an elevated Windows PowerShell window:
 
 ```powershell
-Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WindowStyle Normal -ArgumentList '-NoExit -NoProfile -ExecutionPolicy Bypass -File "C:\SqlPatchOrchestrator\Start-SqlPatchV3Menu.ps1" -Cycle "Production Standard October 2026" -ApplyConcurrency 1'
+Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WindowStyle Normal -ArgumentList '-NoExit -NoProfile -ExecutionPolicy Bypass -File "C:\SqlPatchOrchestrator\Start-SqlPatchV3Menu.ps1" -Cycle "Production Standard October 2026" -ApplyConcurrency 0'
 ```
 
 Change the path if you installed elsewhere. This command starts the menu; it does not start SQL installation.
 
-Set the descriptive cycle name in the command's `-Cycle` argument. Use the same name to resume that campaign. Separate groups should have separate cycle names. The command passes the name directly, so there is no startup cycle-name question before the menu. Option 8 can still switch cycles interactively in the new console. This launch command explicitly limits Apply to **one host at a time**; the script's default when omitted is two.
+Set the descriptive cycle name in the command's `-Cycle` argument. Use the same name to resume that campaign. Separate groups should have separate cycle names. The command passes the name directly, so there is no startup cycle-name question before the menu. Option 8 can still switch cycles interactively in the new console. This launch command uses **all remote hosts in parallel**, also the default when the parameter is omitted. `-ApplyConcurrency 0` means all eligible remote hosts; use a positive number for a fixed cap (for example, 1 for serial Apply or 6 for up to six hosts). Controller capacity and failure gates still apply.
 
 ## Prepare the latest updates (CU or security)
 
@@ -226,7 +226,7 @@ Do not commit customer targets, update EXEs, backups, credentials, or run logs t
 
 ## Parallelism and controller protection
 
-Defaults: **3 concurrent copies**, **2 concurrent target hosts in Apply**, and a **requested 20 MiB/s per-stream I/O limit**. SMB uses Robocopy /IORATE when available; older versions use /IPG pacing, which is not a strict bandwidth cap. Instances on one Windows host are patched sequentially; aliases resolving to the same host are rejected. This workflow supports standalone SQL only; it is not a parallel AG/cluster patcher.
+Defaults: **3 concurrent copies**, **all eligible remote target hosts in Apply (`ApplyConcurrency 0`)**, and a **requested 20 MiB/s per-stream I/O limit**. SMB uses Robocopy /IORATE when available; older versions use /IPG pacing, which is not a strict bandwidth cap. Instances on one Windows host are patched sequentially; aliases resolving to the same host are rejected. This workflow supports standalone SQL only; it is not a parallel AG/cluster patcher.
 
 ```powershell
 # Lower limits for a busy SQL/jump server or a slow shared WAN link:

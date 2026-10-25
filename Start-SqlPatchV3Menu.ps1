@@ -9,7 +9,7 @@ param(
     [pscredential]$Credential,
     [ValidateSet('SMB','PowerShell')][string]$CopyMethod='SMB',
     [ValidateRange(1,8)][int]$CopyConcurrency=3,
-    [ValidateRange(1,4)][int]$ApplyConcurrency=2,
+    [ValidateRange(0,2147483647)][int]$ApplyConcurrency=0,
     [ValidateRange(1,1024)][int]$CopyLimitMBps=20
 )
 Set-StrictMode -Version 2.0
@@ -61,7 +61,8 @@ try{while($true){
     Write-Host '====================================='
     Write-Host ('Version: '+(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'VERSION') -Raw).Trim())
     Write-Host "Cycle: $Cycle"
-    Write-Host "Transfer: $CopyMethod | Parallel limits: copy $CopyConcurrency (up to $CopyLimitMBps MiB/s each); Apply $ApplyConcurrency"
+    $applyLabel=if($ApplyConcurrency-eq0){'ALL remote hosts (resource gates apply)'}else{[string]$ApplyConcurrency}
+    Write-Host "Transfer: $CopyMethod | Parallel limits: copy $CopyConcurrency (up to $CopyLimitMBps MiB/s each); Apply $applyLabel"
     Write-Host 'Controller SQL runs last; controller restart is manual after remote targets finish.'
     Write-Host ("Remote account: {0}" -f $(if($common.ContainsKey('Credential')){$common.Credential.UserName}else{[Security.Principal.WindowsIdentity]::GetCurrent().Name+' (current Windows account)'}))
     Write-Host '1. Open target list (SERVER or SERVER\INSTANCE)'

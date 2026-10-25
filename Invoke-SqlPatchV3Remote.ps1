@@ -27,7 +27,7 @@ param(
     [long]$MinimumTargetFreeBytes = 3GB,
     [ValidateSet('SMB','PowerShell')][string]$CopyMethod='SMB',
     [ValidateRange(1,8)][int]$CopyConcurrency = 3,
-    [ValidateRange(1,4)][int]$ApplyConcurrency = 2,
+    [ValidateRange(0,2147483647)][int]$ApplyConcurrency = 0,
     [ValidateRange(1,1024)][int]$CopyLimitMBps = 20,
     [ValidateRange(10,95)][int]$ControllerCpuLimit = 75,
     [ValidateRange(1,1024)][double]$MinimumControllerFreeGB = 2,

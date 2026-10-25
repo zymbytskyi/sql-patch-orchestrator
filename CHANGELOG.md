@@ -1,3 +1,9 @@
+## 3.1.3 — 2026-10-25
+
+- ApplyConcurrency 0 (new default) runs all eligible remote hosts concurrently. Positive values provide an explicit cap; the former four-host maximum is removed.
+- Controller-last order, resource gates, and failure handling remain enabled. This permits concurrent downtime across the approved scope.
+- Verified overlap of six real local worker processes using simulated targets.
+
 ## 3.1.2
 
 - Automatic selection now chooses the highest released CU-branch build, whether CU or CU + GDR, within the installed SQL major.

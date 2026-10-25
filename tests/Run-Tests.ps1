@@ -17,7 +17,7 @@ foreach($required in @("SchemaVersion='1.4'",'AgeDays','IsCopyOnly-is[DBNull]','
 if($engine-match[regex]::Escape('Join-Path $RunRoot $Cycle')){$failures.Add('Free-form cycle label is used directly as a filesystem path.')}
 foreach($required in @("database_id IN (1,3,4)",'WITH COPY_ONLY, CHECKSUM','RESTORE VERIFYONLY FROM DISK','Created $created of $expected required backup(s)','xp_instance_regread','^Enterprise Edition')){if($worker-notmatch[regex]::Escape($required)){$failures.Add("Backup behavior missing: $required")}}
 if($worker-match[regex]::Escape('Backup ''$path'' was not found.')){$failures.Add('Backup incorrectly requires the remoting DBA to have NTFS read access to the SQL-owned backup file.')}
-if($version-ne'3.1.2'-or$readme-notmatch'v3\.1\.2'){$failures.Add('Version, README, and release tag are inconsistent.')}
+if($version-ne'3.1.3'-or$readme-notmatch'v3\.1\.3'){$failures.Add('Version, README, and release tag are inconsistent.')}
 if($menu-match'Get-Credential|Request-RemoteCredential'){$failures.Add('Menu still prompts for an alternate credential.')}
 $installerText=Get-Content (Join-Path $root 'Install-FromGitHub.ps1') -Raw
 foreach($text in @($menu,$engine,$worker,$installerText)){if($text-match[regex]::Escape('Start-MpScan')){$failures.Add('An explicit blocking Microsoft Defender custom scan remains in an operational script.')}}

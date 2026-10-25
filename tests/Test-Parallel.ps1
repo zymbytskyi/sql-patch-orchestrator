@@ -64,6 +64,18 @@ try{
         $limit=if($phase-eq'Prepare'){$CopyConcurrency}else{$ApplyConcurrency}
         Assert ($peak-ge2-and$peak-le$limit) "$phase did not run concurrently within the requested bound: $peak."
     }
+    $ApplyConcurrency=0
+    $allWorker=Join-Path $temp 'all-worker.ps1'
+    [IO.File]::WriteAllText($allWorker,$fake.Replace('Start-Sleep -Milliseconds 3500','Start-Sleep -Milliseconds 15000'))
+    $state=New-TestState -Count 6 -Local
+    Invoke-ParallelPhase $state Apply -EnginePath $allWorker
+    $remote=@($state.Servers|Where-Object {-not$_.IsController})
+    $lastStart=($remote|ForEach-Object {[datetime]$_.Started}|Sort-Object -Descending|Select-Object -First 1)
+    $firstFinish=($remote|ForEach-Object {[datetime]$_.Finished}|Sort-Object|Select-Object -First 1)
+    Assert ($lastStart-lt$firstFinish) 'All six remote workers did not overlap with ApplyConcurrency 0.'
+    Assert ($global:SqlPatchTestLocalAt-eq6) 'Controller did not wait for all six remote hosts.'
+    Assert ($state.Stage-eq'AwaitingControllerRestart') 'All-host Apply did not finish successfully.'
+    $ApplyConcurrency=2
     $state=New-TestState -Count 6 -Local -Fail '1'
     $failed=$false
     try{Invoke-ParallelPhase $state Apply -EnginePath $fakePath}catch{$failed=$true}
@@ -73,6 +85,7 @@ try{
     $state=New-TestState -Count 4 -Fail '1'
     try{Invoke-ParallelPhase $state Prepare -EnginePath $fakePath}catch{}
     Assert (@($state.Servers|Where-Object Status -eq 'Prepared').Count-eq3) 'Copy failure prevented other target staging.'
+    $ApplyConcurrency=0
     $global:SqlPatchTestPressure=$true;$state=New-TestState -Count 2
     try{Invoke-ParallelPhase $state Apply -EnginePath $fakePath}catch{}
     Assert (@($state.Servers|Where-Object Status -eq 'Deferred').Count-eq2) 'Resource pressure did not defer the queue.'
