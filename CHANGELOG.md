@@ -20,6 +20,8 @@
 
 ## Unreleased
 
+- Pin the README bootstrap to live-tested program commit 3a56433 with setup-process diagnostics.
+
 - Report the blocking setup process name, PID, parent PID, start time, and path before Apply; retain conservative blocking and fail closed if process enumeration fails.
 - Passed live local menu option 5 acceptance with WinRM stopped: SQL2025 CU10 installation, controlled reboot, exact build, transactional writes, CHECKDB, PostVerify, and completed-cycle repeat rejection. See README for scope and delayed-start observation.
 

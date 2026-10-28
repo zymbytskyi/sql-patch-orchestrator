@@ -1,6 +1,6 @@
 # SQL Patch Orchestrator V3.1.3
 
-**Updating an existing server?** Follow [Install or update](#install-on-a-new-controller-or-update-an-existing-installation) below. Opening the menu does not update the program. The bootstrap now includes the local-execution and workgroup-access fix (`010de2f`).
+**Updating an existing server?** Follow [Install or update](#install-on-a-new-controller-or-update-an-existing-installation) below. Opening the menu does not update the program. The bootstrap now includes the local-execution/workgroup fix and setup-process diagnostics (`3a56433`).
 
 ## Open the menu — existing installation
 
@@ -52,7 +52,7 @@ No Git installation or repository clone is required on the controller. Install t
 
 ## Install on a new controller or update an existing installation
 
-The same bootstrap handles new installations and upgrades. It installs **v3.1.3 plus the local-execution/workgroup fix**, pinned to commit `010de2fba6bdd42f2e6b60a45790dc70984457d1`. Git is not required on the server. It downloads and verifies program files, preserves existing scope/media/run data, and backs up replaced program files.
+The same bootstrap handles new installations and upgrades. It installs **v3.1.3 plus the local-execution/workgroup fix and setup-process diagnostics**, pinned to commit `3a5643380cbf5397060bef47962304750436d750`. Git is not required on the server. It downloads and verifies program files, preserves existing scope/media/run data, and backs up replaced program files.
 
 1. Wait for active orchestrator operations to finish, then close all orchestrator menus. The updater rejects an open menu or detected active patch process.
 2. Open **Windows PowerShell as Administrator** on the server where the orchestrator is installed.
@@ -63,7 +63,7 @@ Open **Windows PowerShell as Administrator**, then paste:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$commit = '010de2fba6bdd42f2e6b60a45790dc70984457d1'
+$commit = '3a5643380cbf5397060bef47962304750436d750'
 $destination = 'C:\SqlPatchOrchestrator'
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -87,7 +87,7 @@ if ($LASTEXITCODE -ne 0) {
 Get-Content -LiteralPath (Join-Path $destination 'VERSION')
 ```
 
-Verify that the updater prints **Updated to 3.1.3 from commit 010de2fba6bdd42f2e6b60a45790dc70984457d1** and a **ProgramBackups** path. The version number remains **3.1.3** for this fix, so the VERSION file alone does not identify it. If the command reports an error, stop and review it before reopening the menu.
+Verify that the updater prints **Updated to 3.1.3 from commit 3a5643380cbf5397060bef47962304750436d750** and a **ProgramBackups** path. The version number remains **3.1.3** for this fix, so the VERSION file alone does not identify it. If the command reports an error, stop and review it before reopening the menu.
 
 - **New installation:** creates program files, Packages, Runs, and a comment-only targets.txt. Add your approved targets next.
 - **Existing installation:** keeps targets.txt, Packages, and Runs. Program files are backed up before replacement.

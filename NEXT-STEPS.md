@@ -1,6 +1,6 @@
 # Next steps
 
-- Keep the README upgrade commit and verified updater SHA-256 aligned with the next reviewed program revision; the current fix retains VERSION 3.1.3 and is identified by commit 010de2f.
+- Keep the README upgrade commit and verified updater SHA-256 aligned with the next reviewed program revision; the current fix retains VERSION 3.1.3 and is identified by commit 3a56433.
 
 - Local elevated menu option 5 acceptance with WinRM stopped passed on 2026-10-28 for SQL2025 Enterprise Developer CU10, including backup, installation, manual reboot, database validation and PostVerify. Extend live coverage to workgroup HTTP/HTTPS, non-built-in local administrators/UAC, other editions and remote staging before claiming those paths are qualified.
 
