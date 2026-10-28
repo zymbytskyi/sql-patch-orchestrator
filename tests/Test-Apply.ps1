@@ -27,7 +27,7 @@ function Invoke-Command {
     param($Session,[object[]]$ArgumentList,[scriptblock]$ScriptBlock)
     $text=$ScriptBlock.ToString()
     if($text-match 'SetupRunning='){
-        return [pscustomobject]@{Id=$global:ApplyFixture.Identity;Boot='2026-01-01T00:00:00.0000000Z';SetupRunning=$false}
+        return [pscustomobject]@{Id=$global:ApplyFixture.Identity;Boot='2026-01-01T00:00:00.0000000Z';SetupRunning=$global:ApplyFixture.SetupRunning;SetupProcesses=@([pscustomobject]@{Name='setup.exe';ProcessId=1234;ParentProcessId=100;CreationDate='2026-10-28';ExecutablePath='C:\Fixture\setup.exe'})}
     }
     if($text-match 'Get-FileHash'){return 'HASH'}
     if($text-match 'SqlPatchStandaloneInstall'){
@@ -40,7 +40,7 @@ function Invoke-Command {
     throw "Unmocked remote operation: $text"
 }
 function New-Case {
-    $global:ApplyFixture=[pscustomobject]@{Identity='REMOTE';Version='16.0.1.0';Hadr=0;SetupCode=0;InstallCount=0;RebootCount=0}
+    $global:ApplyFixture=[pscustomobject]@{Identity='REMOTE';Version='16.0.1.0';Hadr=0;SetupRunning=$false;SetupCode=0;InstallCount=0;RebootCount=0}
     [pscustomobject]@{Servers=@([pscustomobject]@{Server='TEST';HostIdentity='REMOTE';Status='';Message='';Instances=@([pscustomobject]@{InstanceName='MSSQLSERVER';Major=16;Version='16.0.1.0';TargetVersion='16.0.2.0'})});Packages=@([pscustomobject]@{Major=16;Name='test.exe';Hash='HASH'})}
 }
 $V2SourcePath=$root;$BackupChoice='0';$ReadyTimeoutSeconds=10
@@ -52,9 +52,10 @@ try{
     $state=New-Case;$global:ApplyFixture.Identity='CONTROLLER';$state.Servers[0].HostIdentity='CONTROLLER'
     Apply-OneServer $state $state.Servers[0] 'SESSION'
     Assert ($state.Servers[0].Status-eq'AwaitingControllerRestart'-and$global:ApplyFixture.RebootCount-eq0) 'Controller was restarted automatically.'
-    foreach($scenario in @('Identity','Hadr','UnknownOutcome','InstallerFailure')){
+    foreach($scenario in @('Identity','Hadr','SetupRunning','UnknownOutcome','InstallerFailure')){
         $state=New-Case
         switch($scenario){
+            SetupRunning {$global:ApplyFixture.SetupRunning=$true}
             Identity {$global:ApplyFixture.Identity='OTHER'}
             Hadr {$global:ApplyFixture.Hadr=1}
             UnknownOutcome {Set-PropertyValue $state.Servers[0].Instances[0] InstallOutcome 'Started'}
@@ -65,6 +66,29 @@ try{
         Assert ($rejected-and$global:ApplyFixture.RebootCount-eq0) "Unsafe $scenario was accepted."
         if($scenario-ne'InstallerFailure'){Assert ($global:ApplyFixture.InstallCount-eq0) "Installer started despite $scenario."}
     }
+    # Execute the real process probe, not the remoting mock above.
+    $probeAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root 'SqlPatchParallel.ps1'),[ref]$tokens,[ref]$errors)
+    $probeCommand=$probeAst.Find({param($n) $n-is[Management.Automation.Language.CommandAst]-and$n.GetCommandName()-eq'Invoke-TargetCommand'-and$n.Extent.Text.Contains('$setupProcesses=@')},$true)
+    $probeBlock=($probeCommand.CommandElements|Where-Object {$_-is[Management.Automation.Language.ScriptBlockExpressionAst]}).ScriptBlock.GetScriptBlock()
+    $script:ProbeProcesses=@();$script:ProbeDenied=$false
+    function Get-CimInstance {
+        [CmdletBinding()]param($ClassName,$Filter)
+        if($ClassName-eq'Win32_Process'){
+            if($script:ProbeDenied){throw 'Process enumeration denied'}
+            Assert ($Filter-match'SQLSetupBootstrapper.exe') 'Process probe lost setup names.'
+            return $script:ProbeProcesses
+        }
+        [pscustomobject]@{LastBootUpTime=[datetime]'2026-10-28'}
+    }
+    $probe=& $probeBlock
+    Assert (-not$probe.SetupRunning-and$probe.SetupProcesses.Count-eq0) 'Empty process list blocked Apply.'
+    $script:ProbeProcesses=@([pscustomobject]@{Name='setup.exe';ProcessId=1234;ParentProcessId=100;ExecutablePath=$null;CreationDate=[datetime]'2026-10-28'})
+    $probe=& $probeBlock
+    Assert ($probe.SetupRunning-and$probe.SetupProcesses[0].ProcessId-eq1234) 'Process without readable path was ignored.'
+    $script:ProbeDenied=$true;$rejected=$false
+    try{$null=& $probeBlock}catch{$rejected=$true}
+    Assert $rejected 'Failed process enumeration was interpreted as no active setup.'
+    Write-Output '[PASS] Actual process probe: empty list, blocking PID with unavailable path, fail-closed enumeration.'
     # Resolve aliases before dispatch; two names may never patch one Windows host concurrently.
     function Invoke-Command {param($Session,$ScriptBlock);[pscustomobject]@{Id='SAME';Name='HOST'}}
     $state=[pscustomobject]@{Servers=@([pscustomobject]@{Server='HOST'},[pscustomobject]@{Server='HOST.DOMAIN'})}

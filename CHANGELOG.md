@@ -20,6 +20,9 @@
 
 ## Unreleased
 
+- Report the blocking setup process name, PID, parent PID, start time, and path before Apply; retain conservative blocking and fail closed if process enumeration fails.
+- Passed live local menu option 5 acceptance with WinRM stopped: SQL2025 CU10 installation, controlled reboot, exact build, transactional writes, CHECKDB, PostVerify, and completed-cycle repeat rejection. See README for scope and delayed-start observation.
+
 - Pin the README upgrade bootstrap to the local/workgroup fix and document in-place update steps, preserved data, exact commit verification, and reopening the existing cycle.
 
 - Execute current-host operations directly with elevation checks, without WinRM; retain local-last Apply and manual restart behavior.

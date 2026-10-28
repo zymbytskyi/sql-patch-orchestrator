@@ -338,10 +338,20 @@ function Apply-OneServer {
     param($State,$Entry,$Session)
     $server=$Entry.Server
     $facts=Invoke-TargetCommand -Session $Session -ScriptBlock {
-        [pscustomobject]@{Id=[string](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography').MachineGuid;Boot=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o');SetupRunning=[bool](Get-Process setup,ScenarioEngine,SQLSetupBootstrapper -ErrorAction SilentlyContinue)}
+        $setupProcesses=@(Get-CimInstance Win32_Process -Filter "Name='setup.exe' OR Name='ScenarioEngine.exe' OR Name='SQLSetupBootstrapper.exe'" -ErrorAction Stop | ForEach-Object {
+            [pscustomobject]@{Name=$_.Name;ProcessId=$_.ProcessId;ParentProcessId=$_.ParentProcessId;ExecutablePath=$_.ExecutablePath;CreationDate=$_.CreationDate}
+        })
+        [pscustomobject]@{Id=[string](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography').MachineGuid;Boot=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o');SetupRunning=($setupProcesses.Count-gt0);SetupProcesses=$setupProcesses}
     }
     if($facts.Id-ne(Get-PropertyValue $Entry HostIdentity '')){throw 'Target host identity changed; run Inventory/Prepare again.'}
-    if($facts.SetupRunning){throw 'Another setup process is running; no installer was started.'}
+    if($facts.SetupRunning){
+        $details=@(Get-PropertyValue $facts SetupProcesses @() | ForEach-Object {
+            $path=if($_.ExecutablePath){$_.ExecutablePath}else{'path unavailable'}
+            '{0} (PID {1}, parent {2}, started {3}, path: {4})' -f $_.Name,$_.ProcessId,$_.ParentProcessId,$_.CreationDate,$path
+        }) -join '; '
+        if(-not$details){$details='Process details unavailable.'}
+        throw "Another setup process is running; no installer was started. $details. Review this process on '$server'; wait for an active installation to finish or close an idle setup window, then retry Apply. Do not terminate an active installer."
+    }
     $controllerId=[string](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography').MachineGuid
     $local=$facts.Id-eq$controllerId
     $fresh=Get-RemoteInventory $Session

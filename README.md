@@ -278,3 +278,17 @@ For `Access is denied`, verify the target account and endpoint rights, then have
 Local SQL remains last in Apply and requires a manual controller restart. Tests exercise transport boundaries with mocks; live workgroup/SQL acceptance remains a separate step.
 
 
+
+## Apply blocked by another setup process
+
+Apply checks for `setup.exe`, `ScenarioEngine.exe`, and `SQLSetupBootstrapper.exe` before starting any installer. A match is conservatively blocked, including an unrelated setup window. The failure now includes process name, PID, parent PID, start time, and executable path; an unreadable path does not bypass the guard. Process-enumeration errors also stop Apply. Command lines are not included in diagnostics.
+
+Review the identified process on the target. Wait for an active installation to finish, or close a confirmed idle setup window normally, then retry option 5 in the same failed cycle. Do not kill an active installer or disable the guard. The message alone does not establish whether a process is SQL Setup or another installer.
+
+### Live local Apply acceptance — 2026-10-28
+
+The actual menu option 5 was tested on a dedicated Windows Server 2025 VM under a local Windows Administrator with temporary SQL sysadmin rights. WinRM was stopped throughout local readiness and Apply. SQL Server 2025 Enterprise Developer was patched from **17.0.4065.4 to CU10 17.0.5035.5 (KB5125471)** using the verified Microsoft package. System COPY_ONLY/CHECKSUM backups and a separate verified test-database backup preceded installation. SQL Setup reported Passed / exit code 0; the orchestrator waited for manual controller restart.
+
+After a controlled reboot, the exact build, transactional database write/read/rollback, CHECKDB, and PostVerify passed. An immediate PostVerify correctly failed while automatic SQL services were still waiting for their configured delayed start; rerunning after they started passed. An unselected SQL Server 2022 instance retained its original build. Repeating option 5 on the completed campaign was rejected without another installation. A harmless real process named setup.exe separately verified blocking and the displayed PID/path. Temporary SQL permissions were removed after testing.
+
+This qualifies the local menu/Apply path on that lab configuration. It does not establish the cause of a particular production setup process, qualify every SQL edition, or constitute live acceptance of workgroup HTTPS/UAC configurations. Raw evidence remains outside Git.
