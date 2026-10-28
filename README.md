@@ -1,5 +1,7 @@
 # SQL Patch Orchestrator V3.1.3
 
+**Updating an existing server?** Follow [Install or update](#install-on-a-new-controller-or-update-an-existing-installation) below. Opening the menu does not update the program. The bootstrap now includes the local-execution and workgroup-access fix (`010de2f`).
+
 ## Open the menu — existing installation
 
 Open **Windows PowerShell as Administrator** and paste this single command:
@@ -50,15 +52,18 @@ No Git installation or repository clone is required on the controller. Install t
 
 ## Install on a new controller or update an existing installation
 
-The same bootstrap handles both cases. It installs the reviewed **v3.1.3** program commit below, not an unreviewed moving branch. It downloads and verifies program files, preserves existing scope/media/run data, and backs up replaced program files.
+The same bootstrap handles new installations and upgrades. It installs **v3.1.3 plus the local-execution/workgroup fix**, pinned to commit `010de2fba6bdd42f2e6b60a45790dc70984457d1`. Git is not required on the server. It downloads and verifies program files, preserves existing scope/media/run data, and backs up replaced program files.
 
-For an existing installation, close all orchestrator menus and finish active operations first. Set **$destination** to the existing installation folder. The updater rejects an open menu or detected active patch process.
+1. Wait for active orchestrator operations to finish, then close all orchestrator menus. The updater rejects an open menu or detected active patch process.
+2. Open **Windows PowerShell as Administrator** on the server where the orchestrator is installed.
+3. Set **$destination** below to that existing installation folder. Do not delete the folder or replace its runtime data.
+4. Paste the entire block below and wait for the success message. This updates the orchestrator program only; it does not install SQL updates or reboot Windows.
 
 Open **Windows PowerShell as Administrator**, then paste:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$commit = 'c9bd929b859bf7543690a896956f0c06d559d6f3'
+$commit = '010de2fba6bdd42f2e6b60a45790dc70984457d1'
 $destination = 'C:\SqlPatchOrchestrator'
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -82,7 +87,7 @@ if ($LASTEXITCODE -ne 0) {
 Get-Content -LiteralPath (Join-Path $destination 'VERSION')
 ```
 
-Expected result: version **3.1.3**, the installed commit, and a **ProgramBackups** path. No SQL installation or reboot starts here.
+Verify that the updater prints **Updated to 3.1.3 from commit 010de2fba6bdd42f2e6b60a45790dc70984457d1** and a **ProgramBackups** path. The version number remains **3.1.3** for this fix, so the VERSION file alone does not identify it. If the command reports an error, stop and review it before reopening the menu.
 
 - **New installation:** creates program files, Packages, Runs, and a comment-only targets.txt. Add your approved targets next.
 - **Existing installation:** keeps targets.txt, Packages, and Runs. Program files are backed up before replacement.
@@ -91,7 +96,7 @@ Expected result: version **3.1.3**, the installed commit, and a **ProgramBackups
 - The commit and SHA-256 form a matched pair. Do not change just one. A future program release needs its own reviewed commit and updater hash.
 - The current GitHub README contains the authoritative bootstrap pin; an installed README may contain an older bootstrap pin.
 
-After updating an existing campaign, rerun **Inventory** and **Prepare with source 2**. Updating program files alone does not replace packages already selected in saved run state.
+After a successful update, use the [menu launcher at the top](#open-the-menu--existing-installation), with the same installation folder and exact existing cycle name. Run **option 2 (Inventory)** first. When the target is the machine running the orchestrator, it now executes locally without WinRM; keep PowerShell elevated. For other workgroup servers, follow [Local administrators and workgroup targets](#local-administrators-and-workgroup-targets). Before a subsequent SQL patch operation, rerun **option 3 / source 2 (Prepare)** and **option 4 (Readiness)**, then review the selected KB/build before approving Apply. Updating program files alone does not replace packages already selected in saved run state.
 
 ## Configure the target scope
 

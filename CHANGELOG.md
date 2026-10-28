@@ -20,6 +20,8 @@
 
 ## Unreleased
 
+- Pin the README upgrade bootstrap to the local/workgroup fix and document in-place update steps, preserved data, exact commit verification, and reopening the existing cycle.
+
 - Execute current-host operations directly with elevation checks, without WinRM; retain local-last Apply and manual restart behavior.
 - Add WinRM HTTPS selection across menu and worker jobs, target-qualified local credentials, and actionable workgroup/UAC access-denied diagnostics.
 - Use authenticated PowerShell transfer with explicit WinRM credentials so media transfer does not silently use the controller account.

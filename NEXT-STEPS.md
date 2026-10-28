@@ -1,5 +1,7 @@
 # Next steps
 
+- Keep the README upgrade commit and verified updater SHA-256 aligned with the next reviewed program revision; the current fix retains VERSION 3.1.3 and is identified by commit 010de2f.
+
 - Validate local elevated execution with WinRM disabled and remote workgroup HTTP/HTTPS access on disposable Windows servers, including media staging, SQL permissions, and manual controller restart. Automated transport tests do not establish live server acceptance.
 
 - Completed two-target SQL 2022 Express/Developer CU27 parallel Apply/reboot/post-verification acceptance on 2026-09-17. Extend live installation coverage to SQL 2017/2019/2025 and production Standard/Enterprise editions before claiming that matrix is tested.
