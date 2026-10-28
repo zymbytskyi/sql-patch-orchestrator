@@ -1,4 +1,41 @@
 #Requires -Version 5.1
+function Test-LocalAdministrator {
+    $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+function Test-LocalTarget {
+    param([string]$Server)
+    if([string]::IsNullOrWhiteSpace($Server)){return $false}
+    if($Server-eq'.'){return $true}
+    $name=$Server.TrimEnd('.')
+    if($name -in @('localhost', '127.0.0.1', '::1', $env:COMPUTERNAME)){return $true}
+    # Use configured DNS identity, never a short-name prefix or arbitrary DNS alias.
+    $properties=[Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties()
+    $fqdn=if($properties.DomainName){$properties.HostName+'.'+$properties.DomainName}else{$properties.HostName}
+    if($name -eq $fqdn){return $true}
+    $address=$null
+    if([Net.IPAddress]::TryParse($name,[ref]$address)){
+        foreach($adapter in [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()){
+            foreach($unicast in $adapter.GetIPProperties().UnicastAddresses){if($address.Equals($unicast.Address)){return $true}}
+        }
+    }
+    return $false
+}
+function Invoke-TargetCommand {
+    [CmdletBinding()]
+    param($Session,[scriptblock]$ScriptBlock,[object[]]$ArgumentList)
+    if($Session -is [string] -and $Session -eq 'SqlPatch.Local'){
+        & $ScriptBlock @ArgumentList
+    }else{
+        $parameters=@{Session=$Session;ScriptBlock=$ScriptBlock;ErrorAction='Stop'}
+        if($PSBoundParameters.ContainsKey('ArgumentList')){$parameters.ArgumentList=$ArgumentList}
+        Invoke-Command @parameters
+    }
+}
+function Remove-TargetSession {
+    [CmdletBinding()]param($Session)
+    if($null-ne$Session -and -not($Session -is [string] -and $Session -eq 'SqlPatch.Local')){Remove-PSSession $Session}
+}
 # Shared coordinator helpers. Only the parent writes the campaign state/dashboard.
 function Copy-VerifiedSmb {
     param([string]$LocalPath,[string]$RemotePath,$Session,[string]$ExpectedHash,[string]$Server)
@@ -6,7 +43,7 @@ function Copy-VerifiedSmb {
     if($RemotePath-notmatch '^([A-Za-z]):\\(.+)$'){throw 'SMB staging requires an absolute drive path.'}
     $drive=$matches[1];$relative=$matches[2]
     if($Server-notmatch '^[A-Za-z0-9][A-Za-z0-9.-]*$'){throw 'Invalid SMB host name.'}
-    $existing=Invoke-Command -Session $Session -ArgumentList $RemotePath -ScriptBlock {
+    $existing=Invoke-TargetCommand -Session $Session -ArgumentList $RemotePath -ScriptBlock {
         param($Path);if(Test-Path -LiteralPath $Path -PathType Leaf){(Get-FileHash -LiteralPath $Path).Hash}
     }
     if($existing-eq$ExpectedHash){return 'AlreadyPresent'}
@@ -16,7 +53,7 @@ function Copy-VerifiedSmb {
     $name=[IO.Path]::GetFileName($LocalPath)
     $candidate=Join-Path $staging $name
     # Never expose an unverified file at the final package path.
-    Invoke-Command -Session $Session -ArgumentList $staging -ScriptBlock {param($Path);New-Item -ItemType Directory -Path $Path -Force|Out-Null}
+    Invoke-TargetCommand -Session $Session -ArgumentList $staging -ScriptBlock {param($Path);New-Item -ItemType Directory -Path $Path -Force|Out-Null}
     $unc='\\'+$Server+'\'+$drive+'$\'+$staging.Substring(3)
     if(-not(Test-Path -LiteralPath $unc)){
         throw "SMB destination unavailable: $unc. Check TCP 445 and share permissions for the current Windows account, or explicitly choose PowerShell transfer. No automatic slow fallback."
@@ -52,13 +89,13 @@ function Copy-VerifiedSmb {
         if($null-eq$process.ExitCode){throw "Robocopy result is unavailable; see $log. Package remains unverified."}
         if($process.ExitCode-ge8){throw "Robocopy exit $($process.ExitCode); see $log. Partial data retained for restart."}
         Set-ServerState $state $Server 'Copying' "SMB completed; verifying SHA-256 on target: $RemotePath"
-        $actual=Invoke-Command -Session $Session -ArgumentList $candidate -ScriptBlock {param($Path);(Get-FileHash -LiteralPath $Path).Hash}
+        $actual=Invoke-TargetCommand -Session $Session -ArgumentList $candidate -ScriptBlock {param($Path);(Get-FileHash -LiteralPath $Path).Hash}
         if($actual-ne$ExpectedHash){
             # Do not repeatedly reuse a completed-but-corrupt candidate.
-            Invoke-Command -Session $Session -ArgumentList $candidate -ScriptBlock {param($Path);Remove-Item -LiteralPath $Path -Force}
+            Invoke-TargetCommand -Session $Session -ArgumentList $candidate -ScriptBlock {param($Path);Remove-Item -LiteralPath $Path -Force}
             throw 'SMB SHA-256 mismatch. Invalid staging copy removed; final package was not replaced.'
         }
-        Invoke-Command -Session $Session -ArgumentList $candidate,$RemotePath -ScriptBlock {param($Source,$Final);Move-Item -LiteralPath $Source -Destination $Final -Force}
+        Invoke-TargetCommand -Session $Session -ArgumentList $candidate,$RemotePath -ScriptBlock {param($Source,$Final);Move-Item -LiteralPath $Source -Destination $Final -Force}
         return 'Copied (SMB verified)'
     }finally{
         if($process){if(-not$process.HasExited){$process.Kill();$process.WaitForExit()};$process.Dispose()}
@@ -89,7 +126,7 @@ function Resolve-ExecutionHosts {
         $session=$null
         try{
             $session=New-TargetSession $entry.Server
-            $identity=Invoke-Command -Session $session -ScriptBlock {
+            $identity=Invoke-TargetCommand -Session $session -ScriptBlock {
                 [pscustomobject]@{Id=[string](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography').MachineGuid;Name=$env:COMPUTERNAME}
             }
             if([string]::IsNullOrWhiteSpace($identity.Id)){throw "Cannot establish physical identity of '$($entry.Server)'."}
@@ -99,7 +136,7 @@ function Resolve-ExecutionHosts {
             if($previous-and$previous-ne$identity.Id){throw "Target host identity changed for '$($entry.Server)'. Start a new inventory before continuing."}
             Set-PropertyValue $entry HostIdentity $identity.Id
             Set-PropertyValue $entry IsController ($identity.Id-eq$controllerId)
-        }finally{if($session){Remove-PSSession $session}}
+        }finally{if($session){Remove-TargetSession $session}}
     }
 }
 function Invoke-ParallelPhase {
@@ -187,7 +224,7 @@ function Invoke-ParallelPhase {
                     [IO.File]::WriteAllText($workerPath,($seed|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
                     $arguments=@{Mode=$Phase;Cycle=$Cycle;TargetListPath=$TargetListPath;PackageRoot=$PackageRoot;RunRoot=$workerRoot;Transport=$Transport;V2SourcePath=$V2SourcePath;WorkerTarget=$entry.Server;ConfirmApply=$true;BackupChoice=$BackupChoice;ReadyTimeoutSeconds=$ReadyTimeoutSeconds;CopyLimitMBps=$CopyLimitMBps}
                     $arguments.CopyMethod=$CopyMethod
-                    if($Credential){$arguments.Credential=$Credential}
+                    if($Credential){$arguments.Credential=$Credential};$arguments.UseSSL=[bool]$UseSSL
                     $job=Start-Job -ScriptBlock {
                         param($Engine,$Arguments)
                         & $Engine @Arguments *> $null
@@ -228,7 +265,7 @@ function Invoke-ParallelPhase {
                     if($Phase-eq'Prepare'){Prepare-OneServer $State $entry $session}
                     else{Apply-OneServer $State $entry $session}
                 }catch{$failed=$true;Set-ServerState $State $entry.Server 'Failed' $_.Exception.Message}
-                finally{if($session){Remove-PSSession $session -ErrorAction SilentlyContinue}}
+                finally{if($session){Remove-TargetSession $session -ErrorAction SilentlyContinue}}
             }
         }
         $State.Stage=if($failed){if($Phase-eq'Prepare'){'PrepareFailed'}else{'Failed'}}elseif($Phase-eq'Prepare'){'Prepared'}elseif(@($State.Servers|Where-Object Status -eq 'AwaitingControllerRestart').Count){'AwaitingControllerRestart'}else{'Complete'}
@@ -266,7 +303,7 @@ function Prepare-OneServer {
     }
     Set-ServerState $State $Entry.Server 'Copying' 'Verifying existing media and staging required bytes'
     if(-not$local){
-        Invoke-Command -Session $Session -ScriptBlock {New-Item -ItemType Directory -Path 'C:\SqlPatchV3Remote\V2','C:\SqlPatchV3Remote\Packages' -Force|Out-Null}
+        Invoke-TargetCommand -Session $Session -ScriptBlock {New-Item -ItemType Directory -Path 'C:\SqlPatchV3Remote\V2','C:\SqlPatchV3Remote\Packages' -Force|Out-Null}
         foreach($worker in Get-ChildItem -LiteralPath $V2SourcePath -File){
             [void](Copy-VerifiedToSession $worker.FullName ("C:\SqlPatchV3Remote\V2\"+$worker.Name) $Session)
         }
@@ -300,7 +337,7 @@ function Prepare-OneServer {
 function Apply-OneServer {
     param($State,$Entry,$Session)
     $server=$Entry.Server
-    $facts=Invoke-Command -Session $Session -ScriptBlock {
+    $facts=Invoke-TargetCommand -Session $Session -ScriptBlock {
         [pscustomobject]@{Id=[string](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography').MachineGuid;Boot=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o');SetupRunning=[bool](Get-Process setup,ScenarioEngine,SQLSetupBootstrapper -ErrorAction SilentlyContinue)}
     }
     if($facts.Id-ne(Get-PropertyValue $Entry HostIdentity '')){throw 'Target host identity changed; run Inventory/Prepare again.'}
@@ -311,7 +348,7 @@ function Apply-OneServer {
     if($fresh.ClusterRegistry-or$fresh.ClusterService-notin@('Absent','Stopped')){throw 'WSFC detected before Apply.'}
     $workerPath=Get-PropertyValue $Entry WorkerPath 'C:\SqlPatchV3Remote\V2\Invoke-SqlPatchV2Local.ps1'
     $workerHash=(Get-FileHash (Join-Path $V2SourcePath 'Invoke-SqlPatchV2Local.ps1')).Hash
-    $remoteWorkerHash=Invoke-Command -Session $Session -ArgumentList $workerPath -ScriptBlock {param($Path);(Get-FileHash -LiteralPath $Path).Hash}
+    $remoteWorkerHash=Invoke-TargetCommand -Session $Session -ArgumentList $workerPath -ScriptBlock {param($Path);(Get-FileHash -LiteralPath $Path).Hash}
     if($remoteWorkerHash-ne$workerHash){throw 'Target worker changed after preparation.'}
     foreach($instance in $Entry.Instances){
         if((Get-PropertyValue $instance InstallOutcome '')-eq'Started'){throw 'Previous installer outcome is unknown. Review SQL Setup logs before resetting the run.'}
@@ -322,11 +359,11 @@ function Apply-OneServer {
         if([version]$actual.Version-ge[version]$instance.TargetVersion){$instance.Version=$actual.Version;continue}
         $package=@($State.Packages|Where-Object Major -eq $instance.Major)[0]
         $packagePath=Get-PropertyValue $instance RemotePackagePath "C:\SqlPatchV3Remote\Packages\$($package.Name)"
-        $hash=Invoke-Command -Session $Session -ArgumentList $packagePath -ScriptBlock {param($Path);(Get-FileHash -LiteralPath $Path).Hash}
+        $hash=Invoke-TargetCommand -Session $Session -ArgumentList $packagePath -ScriptBlock {param($Path);(Get-FileHash -LiteralPath $Path).Hash}
         if($hash-ne$package.Hash){throw 'Target package hash changed after preparation.'}
         if($BackupChoice-ne'0'){
             Set-ServerState $State $server 'BackingUp' "Creating system COPY_ONLY backups for $($instance.InstanceName)"
-            $backup=Invoke-Command -Session $Session -ArgumentList $workerPath,$instance.InstanceName -ScriptBlock {
+            $backup=Invoke-TargetCommand -Session $Session -ArgumentList $workerPath,$instance.InstanceName -ScriptBlock {
                 param($Worker,$Instance)
                 $lines=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Worker -InstanceName $Instance -BackupOnly -BackupChoice 1)
                 [pscustomobject]@{Code=$LASTEXITCODE;Output=$lines-join"\n"}
@@ -336,7 +373,7 @@ function Apply-OneServer {
         Set-PropertyValue $instance InstallOutcome 'Started'
         Set-PropertyValue $Entry NeedsReboot $true
         Set-ServerState $State $server 'Patching' "Installing $($instance.InstanceName); target executes SQL Setup"
-        $installed=Invoke-Command -Session $Session -ArgumentList $workerPath,$instance.InstanceName,$packagePath -ScriptBlock {
+        $installed=Invoke-TargetCommand -Session $Session -ArgumentList $workerPath,$instance.InstanceName,$packagePath -ScriptBlock {
             param($Worker,$Instance,$Package)
             $mutex=New-Object Threading.Mutex($false,'Global\SqlPatchStandaloneInstall')
             $acquired=$mutex.WaitOne(0)
@@ -360,16 +397,16 @@ function Apply-OneServer {
         if(-not$before-or$before-eq$facts.Boot){
             Set-PropertyValue $Entry BootBeforeReboot $facts.Boot
             Set-ServerState $State $server 'Rebooting' 'SQL Setup finished; requesting graceful restart'
-            Invoke-Command -Session $Session -ScriptBlock {shutdown.exe /r /t 5 /d p:4:2 /c 'SQL patch complete';if($LASTEXITCODE-ne0){throw 'Restart request failed.'}}
+            Invoke-TargetCommand -Session $Session -ScriptBlock {shutdown.exe /r /t 5 /d p:4:2 /c 'SQL patch complete';if($LASTEXITCODE-ne0){throw 'Restart request failed.'}}
         }
         Set-ServerState $State $server 'WaitingForOS' 'Waiting for a changed Windows boot time and two SQL-ready probes'
         $deadline=[datetime]::UtcNow.AddSeconds($ReadyTimeoutSeconds);$ready=0;$candidate=$null
         try{
             while([datetime]::UtcNow-lt$deadline-and$ready-lt2){
-                if($candidate){Remove-PSSession $candidate;$candidate=$null}
+                if($candidate){Remove-TargetSession $candidate;$candidate=$null}
                 try{
                     $candidate=New-TargetSession $server
-                    $boot=Invoke-Command -Session $candidate -ScriptBlock {(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')}
+                    $boot=Invoke-TargetCommand -Session $candidate -ScriptBlock {(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')}
                     if($boot-eq$Entry.BootBeforeReboot){$ready=0}else{
                         $probe=Get-RemoteInventory $candidate
                         $selected=@($probe.Instances|Where-Object {$_.InstanceName-in@($Entry.Instances|ForEach-Object InstanceName)})
@@ -380,7 +417,7 @@ function Apply-OneServer {
             }
             if($ready-lt2){throw 'Timed out waiting for confirmed reboot and SQL readiness.'}
             $final=Get-RemoteInventory $candidate
-        }finally{if($candidate){Remove-PSSession $candidate}}
+        }finally{if($candidate){Remove-TargetSession $candidate}}
         Set-PropertyValue $Entry NeedsReboot $false
     }else{$final=Get-RemoteInventory $Session}
     foreach($instance in $Entry.Instances){

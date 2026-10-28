@@ -18,6 +18,13 @@
 
 # Changelog
 
+## Unreleased
+
+- Execute current-host operations directly with elevation checks, without WinRM; retain local-last Apply and manual restart behavior.
+- Add WinRM HTTPS selection across menu and worker jobs, target-qualified local credentials, and actionable workgroup/UAC access-denied diagnostics.
+- Use authenticated PowerShell transfer with explicit WinRM credentials so media transfer does not silently use the controller account.
+- Add local/workgroup transport regression tests; preserve existing domain and PowerShell Direct behavior.
+
 ## 3.1.0 - 2026-09-17
 
 - Default package transport is restartable SMB/Robocopy with three-host concurrency and an explicit PowerShell fallback. No firewall or share policy changes.

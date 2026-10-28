@@ -38,8 +38,8 @@ Supports standalone SQL Server **2017, 2019, 2022, and 2025**, including **Expre
 | Requirement | Details |
 |---|---|
 | Controller | Windows with Windows PowerShell 5.1. Run PowerShell **as Administrator**. |
-| Account | Use a domain account with local administrator and SQL sysadmin permissions on each target. The menu uses the current Windows identity. |
-| Remote access | WinRM connectivity to targets. SMB/Robocopy also needs TCP 445 and access to administrative shares. |
+| Account | Use an elevated account with local administrator and SQL sysadmin permissions on each target. Local execution uses the current Windows identity; remote workgroup targets accept explicit -Credential. |
+| Remote access | WinRM connectivity is required only for remote targets. SMB/Robocopy also needs TCP 445 and access to administrative shares; explicit WinRM credentials select PowerShell transfer. |
 | Internet access | Controller HTTPS access to GitHub API/raw content and Microsoft update metadata/package endpoints. Targets receive packages from the controller. |
 | Capacity | Enough free space on controller and targets for update EXEs, staging, logs, and any requested backups. |
 | Maintenance | Approved scope and downtime, current recoverable backups, application coordination, and a SQL recovery plan before Apply. |
@@ -94,6 +94,8 @@ Expected result: version **3.1.3**, the installed commit, and a **ProgramBackups
 After updating an existing campaign, rerun **Inventory** and **Prepare with source 2**. Updating program files alone does not replace packages already selected in saved run state.
 
 ## Configure the target scope
+
+Run elevated with local administrator and SQL sysadmin rights on the selected targets. Domain accounts and explicit workgroup credentials are supported. WinRM is required only for remote targets; see the local/workgroup instructions below. V3 never scans the domain and never uses forced failover or data-loss operations.
 
 Open the installed target list:
 
@@ -248,5 +250,26 @@ Automatic selection reads [Microsoft's complete build history](https://support.m
 As of 2026-10-23, SQL 2022 resolves to KB5126934 / 16.0.4305.5 and SQL 2019 to KB5128494 / 15.0.4500.2. These are examples, not hardcoded selections. Review each update's known issues before approving Apply.
 
 The dashboard shows the target folder, full file path, transfer method, SHA-256 and verification UTC. Media is green only after a matching hash, never merely because a file exists. A readiness check clears prior verification before rechecking. Update scripts on the controller to use these changes; an installed 3.0.8 menu does not gain them automatically.
+
+## Local administrators and workgroup targets
+
+Run Windows PowerShell 5.1 **as Administrator** on the controller. Targets matching the current computer name, configured FQDN, local interface IPv4, `.`, `localhost`, or `127.0.0.1`/`::1` execute directly in that process. They do not require WinRM, TrustedHosts, or a domain. Arbitrary DNS aliases are not assumed local. Local execution uses the elevated process identity; `-Credential` does not impersonate another account locally. SQL permissions are still checked independently. PowerShell Direct continues to address a VM, even if its name matches the controller.
+
+For another workgroup server, supply a password-bearing local administrator credential explicitly:
+
+```powershell
+$credential = Get-Credential -UserName 'TARGET01\localadmin'
+.\Start-SqlPatchV3Menu.ps1 -Credential $credential -UseSSL -CopyMethod PowerShell
+```
+
+Use the target's actual Windows computer name in the credential. `TARGET01\localadmin` is preserved exactly; `.\localadmin` is qualified against each target's short name (use an explicit computer name when connecting by IP or alias). One supplied credential applies to the target list; use separate runs when accounts/passwords differ. Credentials remain in memory and are passed to child jobs, never written to campaign state.
+
+`-UseSSL` requires an already configured WinRM HTTPS listener and a trusted certificate matching the target name. Certificate validation is not bypassed. Without `-UseSSL`, Negotiate uses the existing bounded per-target TrustedHosts repair on the controller when WinRM reports a trust error; previous entries are preserved and changes are audited. Target remoting, firewall, endpoint permissions, and administrator membership must already permit the connection.
+
+With explicit WinRM credentials, package transfer uses the authenticated PowerShell session, including when the menu's default is SMB. Robocopy otherwise uses the current process identity, not `-Credential`. The engine reports this transport selection; SHA-256 verification and resume remain active.
+
+For `Access is denied`, verify the target account and endpoint rights, then have the Windows administrator review UAC remote token filtering (`LocalAccountTokenFilterPolicy`). Changing that policy affects remote local administrators across the target; the orchestrator does not change it, disable UAC, or enable Basic authentication. See [Microsoft remoting troubleshooting](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_remote_troubleshooting?view=powershell-5.1).
+
+Local SQL remains last in Apply and requires a manual controller restart. Tests exercise transport boundaries with mocks; live workgroup/SQL acceptance remains a separate step.
 
 

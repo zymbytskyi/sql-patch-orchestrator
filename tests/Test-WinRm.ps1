@@ -13,7 +13,8 @@ foreach($name in @('Add-TargetTrustedHost','New-TargetSession','Get-Scope')){
 function Assert($Condition,[string]$Message){if(-not$Condition){throw $Message}}
 $testRoot=Join-Path ([IO.Path]::GetTempPath()) ('SqlPatchWinRm-'+[guid]::NewGuid().ToString('N'))
 $cycleRoot=$testRoot
-$Transport='WinRM';$Credential=$null
+$Transport='WinRM';$Credential=$null;$UseSSL=$false
+. (Join-Path $root 'SqlPatchParallel.ps1')
 $global:SqlPatchMockpolicy='old.example.test'
 $global:SqlPatchMocksource='Local';$global:SqlPatchMockdenyWrite=$false;$global:SqlPatchMockignoreWrite=$false
 $global:SqlPatchMockattempts=@{};$global:SqlPatchMockwrites=0;$global:SqlPatchMockscenario='Mixed'

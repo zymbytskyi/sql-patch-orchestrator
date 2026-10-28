@@ -16,6 +16,7 @@ param(
     [string]$Cycle = (Get-Date).ToString('yyyy-MM',[Globalization.CultureInfo]::InvariantCulture),
     [ValidateSet('WinRM','PowerShellDirect')][string]$Transport = 'WinRM',
     [pscredential]$Credential,
+    [switch]$UseSSL,
     [switch]$ApproveScope,
     [switch]$DownloadLatest,
     [switch]$ConfirmBackup,
@@ -92,7 +93,7 @@ function Get-Scope {
     $uniqueLines = @($lines | Sort-Object -Unique)
     if ($uniqueLines.Count -ne $lines.Count) { throw 'The target list contains duplicate entries.' }
     $parsed = foreach ($line in $lines) {
-        if ($line -notmatch '^([A-Za-z0-9][A-Za-z0-9.-]{0,252})(?:\\([A-Za-z0-9_$#@-]{1,128}))?$') { throw "Invalid target '$line'. Use SERVER or SERVER\INSTANCE." }
+        if ($line -notmatch '^([A-Za-z0-9][A-Za-z0-9.-]{0,252}|\.|::1)(?:\\([A-Za-z0-9_$#@-]{1,128}))?$') { throw "Invalid target '$line'. Use SERVER or SERVER\INSTANCE." }
         [pscustomobject]@{ Server=$matches[1]; Instance=if($matches[2]){$matches[2]}else{''}; Target=$line }
     }
     $groups = @($parsed | Group-Object Server)
@@ -145,20 +146,32 @@ function New-TargetSession {
         if (-not $Credential) { throw 'PowerShellDirect transport requires -Credential.' }
         return New-PSSession -VMName $Server -Credential $Credential
     }
+    if(Test-LocalTarget $Server){
+        if(-not(Test-LocalAdministrator)){throw 'Local execution requires Windows PowerShell Run as Administrator. -Credential applies only to remote targets.'}
+        return 'SqlPatch.Local'
+    }
     $parameters=@{ComputerName=$Server;Authentication='Negotiate';ErrorAction='Stop'}
-    if($Credential){$parameters.Credential=$Credential}
+    if($UseSSL){$parameters.UseSSL=$true}
+    if($Credential){
+        $parameters.Credential=$Credential
+        if($Credential.UserName.StartsWith('.\')){
+            $address=$null
+            if([Net.IPAddress]::TryParse($Server,[ref]$address)){throw 'Use an explicit TARGET\localadmin credential when connecting by IP address.'}
+            $parameters.Credential=New-Object Management.Automation.PSCredential (($Server.Split('.')[0]+'\'+$Credential.UserName.Substring(2)),$Credential.Password)
+        }
+    }
     try{return New-PSSession @parameters}
     catch{
         $failure=$_
         # This client policy error differs from a target rejecting the account.
-        if($failure.Exception.Message -match '(?i)TrustedHosts|Allow\s+implicit\s+credentials\s+for\s+Negotiate'){
+        if(-not$UseSSL -and $failure.Exception.Message -match '(?i)TrustedHosts|Allow\s+implicit\s+credentials\s+for\s+Negotiate'){
             Add-TargetTrustedHost $Server
             Write-Host "WinRM: retrying '$Server' once with the same Windows identity." -ForegroundColor Cyan
             try{return New-PSSession @parameters}
-            catch{throw "WinRM connection to '$Server' still failed after TrustedHosts verification: $($_.Exception.Message)"}
+            catch{throw "WinRM connection to '$Server' still failed after TrustedHosts verification. For workgroup targets use explicit -Credential (TARGET\localadmin); for access denied review endpoint permissions, Administrator membership and UAC LocalAccountTokenFilterPolicy: $($_.Exception.Message)"}
         }
         if($failure.Exception.Message -match '(?i)Access is denied|0x80070005'){
-            throw "WinRM access denied on '$Server'. Check this account's target remoting endpoint permissions and local Administrator membership; TrustedHosts does not grant these rights. $($failure.Exception.Message)"
+            throw "WinRM access denied on '$Server'. Use explicit -Credential (TARGET\localadmin) for workgroup access. Check target local Administrator membership, remoting endpoint permissions, and UAC remote token filtering (LocalAccountTokenFilterPolicy). Policy changes require administrator review; TrustedHosts does not grant these rights. $($failure.Exception.Message)"
         }
         throw
     }
@@ -251,8 +264,8 @@ function Confirm-Scope {
     if (-not $ApproveScope) { $answer=Read-Host "Type $($Names.Count) to confirm this exact list";if($answer-ne[string]$Names.Count){throw 'Scope confirmation failed.'} }
 }
 function Get-RemoteInventory {
-    param([Management.Automation.Runspaces.PSSession]$Session)
-    Invoke-Command -Session $Session -ScriptBlock {
+    param($Session)
+    Invoke-TargetCommand -Session $Session -ScriptBlock {
         $registry = 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL'
         $instances = @()
         if (Test-Path $registry) {
@@ -275,8 +288,8 @@ SELECT d.name DatabaseName,d.state_desc State,b.backup_finish_date LastFullBacku
     }
 }
 function Get-RemotePostVerification {
-    param([Management.Automation.Runspaces.PSSession]$Session,[string[]]$InstanceNames)
-    Invoke-Command -Session $Session -ArgumentList (,$InstanceNames) -ScriptBlock {
+    param($Session,[string[]]$InstanceNames)
+    Invoke-TargetCommand -Session $Session -ArgumentList (,$InstanceNames) -ScriptBlock {
         param([string[]]$Names)
         $services=@(Get-CimInstance Win32_Service)
         $sqlPattern='^(MSSQL|SQLAgent|SQLBrowser|SQLWriter|MsDtsServer|SSISScaleOut)'
@@ -420,22 +433,22 @@ function Get-LatestPackageMap {
     $map
 }
 function Copy-VerifiedToSession {
-    param([string]$LocalPath,[string]$RemotePath,[Management.Automation.Runspaces.PSSession]$Session,[string]$ExpectedHash)
+    param([string]$LocalPath,[string]$RemotePath,$Session,[string]$ExpectedHash)
     $localHash=if($ExpectedHash){$ExpectedHash}else{(Get-FileHash -LiteralPath $LocalPath).Hash}
-    $existing=Invoke-Command -Session $Session -ArgumentList $RemotePath -ScriptBlock {param($Path);if(Test-Path -LiteralPath $Path -PathType Leaf){(Get-FileHash -LiteralPath $Path).Hash}}
+    $existing=Invoke-TargetCommand -Session $Session -ArgumentList $RemotePath -ScriptBlock {param($Path);if(Test-Path -LiteralPath $Path -PathType Leaf){(Get-FileHash -LiteralPath $Path).Hash}}
     if($existing-eq$localHash){return 'AlreadyPresent'}
     $length=(Get-Item -LiteralPath $LocalPath).Length;$partial=$RemotePath+'.partial'
     for($attempt=1;$attempt-le3;$attempt++){
         $stream=$null
         try{
-            $info=Invoke-Command -Session $Session -ArgumentList $partial -ScriptBlock {
+            $info=Invoke-TargetCommand -Session $Session -ArgumentList $partial -ScriptBlock {
                 param($Path)
                 if(Test-Path -LiteralPath $Path){[pscustomobject]@{Length=(Get-Item -LiteralPath $Path).Length;Hash=(Get-FileHash -LiteralPath $Path).Hash}}
                 else{[pscustomobject]@{Length=0;Hash=''}}
             }
             $offset=[long]$info.Length
             if($offset-gt$length-or($offset-gt0-and(Get-PrefixHash $LocalPath $offset)-ne$info.Hash)){$offset=0}
-            if($offset-eq0){Invoke-Command -Session $Session -ArgumentList $partial -ScriptBlock {param($Path);$f=[IO.File]::Open($Path,[IO.FileMode]::Create,[IO.FileAccess]::Write);$f.Dispose()}}
+            if($offset-eq0){Invoke-TargetCommand -Session $Session -ArgumentList $partial -ScriptBlock {param($Path);$f=[IO.File]::Open($Path,[IO.FileMode]::Create,[IO.FileAccess]::Write);$f.Dispose()}}
             $resumed=$offset-gt0;$initial=$offset
             $stream=[IO.File]::OpenRead($LocalPath);[void]$stream.Seek($offset,[IO.SeekOrigin]::Begin)
             $timer=[Diagnostics.Stopwatch]::StartNew();$lastReport=-10.0
@@ -446,7 +459,7 @@ function Copy-VerifiedToSession {
                 if($read-eq0){throw 'Source file truncated during transfer.'}
                 $chunk=$buffer
                 if($read-ne$buffer.Length){$chunk=New-Object byte[] $read;[Array]::Copy($buffer,$chunk,$read)}
-                Invoke-Command -Session $Session -ArgumentList $partial,$offset,([byte[]]$chunk) -ScriptBlock {
+                Invoke-TargetCommand -Session $Session -ArgumentList $partial,$offset,([byte[]]$chunk) -ScriptBlock {
                     param($Path,[long]$Offset,[byte[]]$Data)
                     $f=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::None)
                     try{if($f.Length-ne$Offset){throw 'Partial-file offset changed.'};[void]$f.Seek($Offset,[IO.SeekOrigin]::Begin);$f.Write($Data,0,$Data.Length)}finally{$f.Dispose()}
@@ -463,9 +476,9 @@ function Copy-VerifiedToSession {
             }
             $stream.Dispose();$stream=$null
             Set-ServerState $state $server 'Copying' ("Verifying SHA-256: "+[IO.Path]::GetFileName($LocalPath))
-            $copied=Invoke-Command -Session $Session -ArgumentList $partial -ScriptBlock {param($Path);(Get-FileHash -LiteralPath $Path).Hash}
+            $copied=Invoke-TargetCommand -Session $Session -ArgumentList $partial -ScriptBlock {param($Path);(Get-FileHash -LiteralPath $Path).Hash}
             if($copied-ne$localHash){throw 'Final SHA-256 mismatch; source or partial content changed.'}
-            Invoke-Command -Session $Session -ArgumentList $partial,$RemotePath -ScriptBlock {param($Partial,$Final);Move-Item -LiteralPath $Partial -Destination $Final -Force}
+            Invoke-TargetCommand -Session $Session -ArgumentList $partial,$RemotePath -ScriptBlock {param($Partial,$Final);Move-Item -LiteralPath $Partial -Destination $Final -Force}
             return $(if($resumed){'Resumed'}else{'Copied'})
         }catch{
             if($attempt-ge3){throw "Copy to '$RemotePath' failed; partial retained for verified resume: $($_.Exception.Message)"}
@@ -474,6 +487,10 @@ function Copy-VerifiedToSession {
     }
 }
 . (Join-Path $PSScriptRoot 'SqlPatchParallel.ps1')
+if($Credential -and $Transport-eq'WinRM' -and $CopyMethod-eq'SMB'){
+    Write-Host 'Explicit remote credentials: using PowerShell transfer through the authenticated session (SMB uses the current Windows account).' -ForegroundColor Yellow
+    $CopyMethod='PowerShell'
+}
 $lockHash=Get-ScopeHash @([IO.Path]::GetFullPath($cycleRoot))
 $engineMutex=New-Object Threading.Mutex($false,("Local\SqlPatchEngine_"+$lockHash))
 $lockHeld=$false
@@ -501,7 +518,7 @@ try {
     if($Mode-eq'Inventory'){
         Confirm-Scope $scopeTargets
         $state=[pscustomobject]@{SchemaVersion='1.4';Cycle=$Cycle;ScopeHash=$scopeHash;Stage='Inventory';Transport=$Transport;UpdatedUtc='';Packages=@();Servers=@($scope|ForEach-Object{[pscustomobject]@{Server=$_.Server;RequestedInstances=@($_.RequestedInstances);Status='Pending';Message='Waiting';LastChangeUtc='';TimeZone='Not checked';UtcOffset='';FreeGiB='Not checked';PendingReboot='Not checked';PartialFiles='Not checked';Instances=@()}})};Save-State $state
-        foreach($targetServer in $scope){$server=$targetServer.Server;$session=$null;try{Set-ServerState $state $server 'Connecting' 'Opening remote session';$session=New-TargetSession $server;Set-ServerState $state $server 'Inventory' 'Reading SQL instances and backup history';$inventory=Get-RemoteInventory $session;$entry=@($state.Servers|Where-Object { $_.Server -eq $server })[0];$reasons=New-Object Collections.Generic.List[string]
+        foreach($targetServer in $scope){$server=$targetServer.Server;$session=$null;try{Set-ServerState $state $server 'Connecting' 'Opening target execution context';$session=New-TargetSession $server;Set-ServerState $state $server 'Inventory' 'Reading SQL instances and backup history';$inventory=Get-RemoteInventory $session;$entry=@($state.Servers|Where-Object { $_.Server -eq $server })[0];$reasons=New-Object Collections.Generic.List[string]
             $entry.TimeZone=$inventory.TimeZone;$entry.UtcOffset=$inventory.UtcOffset
             if($inventory.ClusterRegistry){$reasons.Add('WSFC registry exists')};if($inventory.ClusterService-ne'Absent'-and$inventory.ClusterService-ne'Stopped'){$reasons.Add("Cluster Service $($inventory.ClusterService)")};if(-not@($inventory.Instances).Count){$reasons.Add('No SQL Database Engine instance found')}
             $requested=@($targetServer.RequestedInstances);$available=@($inventory.Instances|ForEach-Object InstanceName)
@@ -510,7 +527,7 @@ try {
             $normalized=@();foreach($instance in $selected){if($instance.PSObject.Properties.Name-contains'Error'){$reasons.Add("$($instance.InstanceName): $($instance.Error)");continue};$instanceReasons=New-Object Collections.Generic.List[string];$major=([version]$instance.Version).Major;if(-not$supported.ContainsKey($major)){$instanceReasons.Add("unsupported major $major")};if($instance.Edition-notmatch'Express|^Standard Edition|Standard Developer|Developer Edition|^Enterprise Edition'){$instanceReasons.Add("unsupported edition $($instance.Edition)")};if($instance.IsClustered-or$instance.IsHadrEnabled-or$instance.ReplicaCount){$instanceReasons.Add('FCI/Always On/AG detected')};if(-not$instance.IsSysadmin){$instanceReasons.Add('current account is not sysadmin')};foreach($reason in $instanceReasons){$reasons.Add("$($instance.InstanceName): $reason")};$warnings=@(Get-BackupWarnings $instance.Backups);$normalized+=[pscustomobject]@{FullName="$server\$($instance.InstanceName)";InstanceName=$instance.InstanceName;Major=$major;Edition=$instance.Edition;Version=$instance.Version;UpdateLevel=$instance.UpdateLevel;TargetVersion='Not selected';Readiness=if($instanceReasons.Count){'Blocked'}else{'Ready'};SqlReady='Yes';Standalone=if($instance.IsClustered-or$instance.IsHadrEnabled-or$instance.ReplicaCount){'No'}else{'Yes'};Sysadmin=if($instance.IsSysadmin){'Yes'}else{'No'};PackageName='Not selected';UpdateName='Not selected';ReleaseDate='Unknown';PackageAgeDays='Unknown';MetadataSource='Not queried';ReleaseMetadataSchema=2;DistributionState='Not staged';PackageState='Not verified';PackageHashVerified='Not checked';BackupAction='Inventory only';Backups=@($instance.Backups);BackupWarnings=$warnings}};$entry.Instances=$normalized
             $warningCount=@($normalized|ForEach-Object BackupWarnings).Count
             if($reasons.Count){Set-ServerState $state $server 'Blocked' ($reasons-join'; ')}else{Set-ServerState $state $server 'Ready' ("{0} instance(s); inventory complete; {1} backup warning(s)" -f $normalized.Count,$warningCount)}
-        }catch{Set-ServerState $state $server 'Failed' $_.Exception.Message}finally{if($session){Remove-PSSession $session}}}
+        }catch{Set-ServerState $state $server 'Failed' $_.Exception.Message}finally{if($session){Remove-TargetSession $session}}}
         $state.Stage=if(@($state.Servers|Where-Object { $_.Status -in @('Blocked','Failed') }).Count){'InventoryBlocked'}else{'InventoryReady'};Save-State $state;if($state.Stage-ne'InventoryReady'){exit 1};exit 0
     }
     $state=Read-State;if($state.ScopeHash-ne$scopeHash){throw 'targets.txt changed after Inventory. Run Inventory again.'}
@@ -526,12 +543,12 @@ try {
                 $session=New-TargetSession $server
                 $backupWorker=Join-Path $V2SourcePath 'Invoke-SqlPatchV2Local.ps1'
                 if(-not(Get-PropertyValue $entry IsController $false)){
-                    Invoke-Command -Session $session -ScriptBlock{New-Item -ItemType Directory -Path 'C:\SqlPatchV3Remote\V2' -Force|Out-Null}
+                    Invoke-TargetCommand -Session $session -ScriptBlock{New-Item -ItemType Directory -Path 'C:\SqlPatchV3Remote\V2' -Force|Out-Null}
                     foreach($worker in @(Get-ChildItem $V2SourcePath -File)){[void](Copy-VerifiedToSession $worker.FullName "C:\SqlPatchV3Remote\V2\$($worker.Name)" $session)}
                     $backupWorker='C:\SqlPatchV3Remote\V2\Invoke-SqlPatchV2Local.ps1'
                 }
                 foreach($instance in @($entry.Instances)){
-                    $backupResult=Invoke-Command -Session $session -ArgumentList @($instance.InstanceName,$BackupChoice,$backupWorker) -ScriptBlock{param($Instance,$Backup,$WorkerFile);$lines=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WorkerFile -InstanceName $Instance -BackupOnly -BackupChoice $Backup);$code=$LASTEXITCODE;[pscustomobject]@{ExitCode=$code;Output=($lines-join"`n")}}
+                    $backupResult=Invoke-TargetCommand -Session $session -ArgumentList @($instance.InstanceName,$BackupChoice,$backupWorker) -ScriptBlock{param($Instance,$Backup,$WorkerFile);$lines=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WorkerFile -InstanceName $Instance -BackupOnly -BackupChoice $Backup);$code=$LASTEXITCODE;[pscustomobject]@{ExitCode=$code;Output=($lines-join"`n")}}
                     Write-Host "`n$server\$($instance.InstanceName) system backup result:" -ForegroundColor Cyan
                     Write-Host $backupResult.Output
                     if($backupResult.ExitCode-ne0){throw "V2 backup failed for $($instance.InstanceName) with exit $($backupResult.ExitCode). $($backupResult.Output)"}
@@ -540,7 +557,7 @@ try {
                 foreach($instance in @($entry.Instances)){$actual=@($inventory.Instances|Where-Object { $_.InstanceName -eq $instance.InstanceName })[0];if(-not$actual-or$actual.PSObject.Properties.Name-contains'Error'){throw "Could not refresh backup history for $($instance.InstanceName)."};$instance.Backups=@($actual.Backups);$instance.BackupWarnings=@(Get-BackupWarnings $actual.Backups);$instance.BackupAction='System COPY_ONLY verified'}
                 $warningCount=@($entry.Instances|ForEach-Object BackupWarnings).Count
                 Set-ServerState $state $server 'Ready' ("COPY_ONLY backups completed and verified; inventory refreshed; {0} backup warning(s) remain" -f $warningCount)
-            }catch{$state.Stage='BackupFailed';Set-ServerState $state $server 'Failed' $_.Exception.Message;Save-State $state;throw}finally{if($session){Remove-PSSession $session}}
+            }catch{$state.Stage='BackupFailed';Set-ServerState $state $server 'Failed' $_.Exception.Message;Save-State $state;throw}finally{if($session){Remove-TargetSession $session}}
         }
         $state.Stage='InventoryReady';Save-State $state;exit 0
     }
@@ -557,7 +574,7 @@ try {
             $entry=$state.Servers[0];$server=$entry.Server;$session=$null
             try{$state.Stage='Preparing';$session=New-TargetSession $server;Prepare-OneServer $state $entry $session;$state.Stage='Prepared';Save-State $state}
             catch{Set-ServerState $state $server 'Failed' $_.Exception.Message;throw}
-            finally{if($session){Remove-PSSession $session}}
+            finally{if($session){Remove-TargetSession $session}}
         }
         exit 0
     }
@@ -593,11 +610,11 @@ try {
                     $package=@($state.Packages|Where-Object Major -eq $instance.Major)[0];if(-not$package){throw "Selected package metadata is missing for SQL major $($instance.Major)."}
                     if(-not(Test-Path -LiteralPath $package.Path -PathType Leaf)-or(Get-FileHash -LiteralPath $package.Path -Algorithm SHA256).Hash-ne$package.Hash){throw "Controller package '$($package.Name)' is missing or changed."}
                     $remotePath=Get-PropertyValue $instance RemotePackagePath "C:\SqlPatchV3Remote\Packages\$($package.Name)"
-                    $remote=Invoke-Command -Session $session -ArgumentList $remotePath -ScriptBlock{param($Path);if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};$sig=Get-AuthenticodeSignature -LiteralPath $Path;[pscustomobject]@{Hash=(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash;Signature=$sig.Status.ToString();Signer=if($sig.SignerCertificate){$sig.SignerCertificate.Subject}else{''}}}
+                    $remote=Invoke-TargetCommand -Session $session -ArgumentList $remotePath -ScriptBlock{param($Path);if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};$sig=Get-AuthenticodeSignature -LiteralPath $Path;[pscustomobject]@{Hash=(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash;Signature=$sig.Status.ToString();Signer=if($sig.SignerCertificate){$sig.SignerCertificate.Subject}else{''}}}
                     if(-not$remote-or$remote.Hash-ne$package.Hash-or$remote.Signature-ne'Valid'-or$remote.Signer-notmatch'Microsoft Corporation'){throw "Remote package '$($package.Name)' failed hash or Microsoft signature verification."};$instance.PackageName=$package.Name;$instance.PackageState='Signature + SHA-256 verified';$instance.PackageHashVerified='Yes';Set-PropertyValue $instance PackageVerifiedUtc ([datetime]::UtcNow.ToString('o'));Set-PropertyValue $instance PackageSha256 $package.Hash
                 }
-                foreach($worker in Get-ChildItem -LiteralPath $V2SourcePath -File){$remotePath=if(Get-PropertyValue $entry IsController $false){$worker.FullName}else{"C:\SqlPatchV3Remote\V2\$($worker.Name)"};$remoteHash=Invoke-Command -Session $session -ArgumentList $remotePath -ScriptBlock{param($Path);if(Test-Path -LiteralPath $Path -PathType Leaf){(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash}};if($remoteHash-ne(Get-FileHash -LiteralPath $worker.FullName -Algorithm SHA256).Hash){throw "Remote worker '$($worker.Name)' failed hash verification."}}
-                $hostState=Invoke-Command -Session $session -ScriptBlock{[pscustomobject]@{FreeBytes=[long](Get-Volume C).SizeRemaining;PendingReboot=(Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')-or(Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired');PartialFiles=@(Get-ChildItem 'C:\SqlPatchV3Remote' -Filter '*.partial' -Recurse -File -ErrorAction SilentlyContinue).Count}}
+                foreach($worker in Get-ChildItem -LiteralPath $V2SourcePath -File){$remotePath=if(Get-PropertyValue $entry IsController $false){$worker.FullName}else{"C:\SqlPatchV3Remote\V2\$($worker.Name)"};$remoteHash=Invoke-TargetCommand -Session $session -ArgumentList $remotePath -ScriptBlock{param($Path);if(Test-Path -LiteralPath $Path -PathType Leaf){(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash}};if($remoteHash-ne(Get-FileHash -LiteralPath $worker.FullName -Algorithm SHA256).Hash){throw "Remote worker '$($worker.Name)' failed hash verification."}}
+                $hostState=Invoke-TargetCommand -Session $session -ScriptBlock{[pscustomobject]@{FreeBytes=[long](Get-Volume C).SizeRemaining;PendingReboot=(Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')-or(Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired');PartialFiles=@(Get-ChildItem 'C:\SqlPatchV3Remote' -Filter '*.partial' -Recurse -File -ErrorAction SilentlyContinue).Count}}
                 $entry.FreeGiB=[math]::Round($hostState.FreeBytes/1GB,2);$entry.PendingReboot=[string][bool]$hostState.PendingReboot;$entry.PartialFiles=[int]$hostState.PartialFiles
                 if($hostState.FreeBytes-lt$MinimumTargetFreeBytes){throw "Only $([math]::Round($hostState.FreeBytes/1GB,2)) GiB is free; minimum is $([math]::Round($MinimumTargetFreeBytes/1GB,2)) GiB."}
                 if($hostState.PendingReboot){throw 'A pending reboot exists before patching.'};if($hostState.PartialFiles){throw "$($hostState.PartialFiles) partial distribution file(s) exist."}
@@ -611,7 +628,7 @@ try {
                 Set-PropertyValue $entry PreflightDetails $_.Exception.Message
                 foreach($item in $entry.Instances){$item.Readiness='Blocked'}
                 Set-ServerState $state $server 'PreflightBlocked' $_.Exception.Message
-            }finally{if($session){Remove-PSSession $session}}
+            }finally{if($session){Remove-TargetSession $session}}
         }
         $state.Stage=if($preflightFailed){'PreflightBlocked'}else{'PreflightReady'}
         Save-State $state;Show-PreflightSummary $state
@@ -651,7 +668,7 @@ try {
                     if($issues.Count){Set-PropertyValue $instance PostVerifyStatus 'Failed';Set-PropertyValue $instance PostVerifyDetails ($issues-join'; ');$failed=$true}else{Set-PropertyValue $instance PostVerifyStatus 'Passed';Set-PropertyValue $instance PostVerifyDetails 'Two SQL probes, services, databases, build, and host checks passed'}
                 }
                 if($serverIssues.Count){Set-ServerState $state $server 'PostVerifyFailed' ($serverIssues-join'; ');$failed=$true}else{Set-ServerState $state $server 'PostVerified' 'Two SQL probes passed; selected databases are online/accessible and automatic SQL services are running'}
-            }catch{$failed=$true;Set-PropertyValue $entry PostVerifyWarnings $_.Exception.Message;foreach($instance in @($entry.Instances)){Set-PropertyValue $instance PostVerifyStatus 'Failed';Set-PropertyValue $instance PostVerifyDetails $_.Exception.Message};Set-ServerState $state $server 'PostVerifyFailed' $_.Exception.Message}finally{if($session){Remove-PSSession $session}}
+            }catch{$failed=$true;Set-PropertyValue $entry PostVerifyWarnings $_.Exception.Message;foreach($instance in @($entry.Instances)){Set-PropertyValue $instance PostVerifyStatus 'Failed';Set-PropertyValue $instance PostVerifyDetails $_.Exception.Message};Set-ServerState $state $server 'PostVerifyFailed' $_.Exception.Message}finally{if($session){Remove-TargetSession $session}}
         }
         if($failed){$state.Stage='PostVerifyFailed'}elseif($postPatch){$state.Stage='PostVerified'}else{$state.Stage=$previousStage;foreach($entry in @($state.Servers)){$prior=$previousServerState[$entry.Server];$entry.Status=$prior.Status;$entry.Message=$prior.Message}}
         Save-State $state;if($failed){exit 1};exit 0
@@ -666,7 +683,7 @@ try {
             $entry=$state.Servers[0];$server=$entry.Server;$session=$null
             try{$state.Stage='Applying';$session=New-TargetSession $server;Apply-OneServer $state $entry $session;$state.Stage='Complete';Save-State $state}
             catch{Set-ServerState $state $server 'Failed' $_.Exception.Message;throw}
-            finally{if($session){Remove-PSSession $session -ErrorAction SilentlyContinue}}
+            finally{if($session){Remove-TargetSession $session -ErrorAction SilentlyContinue}}
         }
         exit 0
     }

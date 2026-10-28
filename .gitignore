@@ -36,3 +36,4 @@ Thumbs.db
 !/tests/Test-Readiness.ps1
 !/tests/Test-Latest.ps1
 !/tests/Test-Menu.ps1
+!/tests/Test-LocalTransport.ps1

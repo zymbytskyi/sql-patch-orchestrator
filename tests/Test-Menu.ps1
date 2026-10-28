@@ -6,7 +6,8 @@ New-Item -ItemType Directory -Path $temp|Out-Null
 Copy-Item (Join-Path $root 'Start-SqlPatchV3Menu.ps1') $temp
 Copy-Item (Join-Path $root 'VERSION') $temp
 $fixture=@'
-param($Mode,$Cycle,$PackageRoot,$RunRoot,$Transport,$CopyMethod,$CopyConcurrency,$ApplyConcurrency,$CopyLimitMBps,[switch]$DownloadLatest,[switch]$ConfirmBackup,[switch]$ConfirmApply,$BackupChoice)
+param($Mode,$Cycle,$PackageRoot,$RunRoot,$Transport,$CopyMethod,$CopyConcurrency,$ApplyConcurrency,$CopyLimitMBps,$UseSSL,$Credential,[switch]$DownloadLatest,[switch]$ConfirmBackup,[switch]$ConfirmApply,$BackupChoice)
+if(-not$UseSSL-or$Credential.UserName-ne'REMOTE01\localadmin'){throw 'Menu lost HTTPS or credential settings.'}
 $global:MenuCalls.Add("${Mode}|${CopyMethod}|${DownloadLatest}|${BackupChoice}")
 $folder=Join-Path $RunRoot $Cycle
 New-Item -ItemType Directory -Path $folder -Force|Out-Null
@@ -22,7 +23,8 @@ function global:Read-Host {param($Prompt);if(-not$global:MenuAnswers.Count){thro
 function global:Clear-Host {}
 function global:Start-Process {param($FilePath,$ArgumentList);$global:MenuCalls.Add("Open|$FilePath")}
 try{
-    & (Join-Path $temp 'Start-SqlPatchV3Menu.ps1') -Cycle Test2026 -RunRoot (Join-Path $temp 'Runs') 6>$null
+    $credential=New-Object Management.Automation.PSCredential ('REMOTE01\localadmin',(ConvertTo-SecureString 'test-only-placeholder' -AsPlainText -Force))
+    & (Join-Path $temp 'Start-SqlPatchV3Menu.ps1') -UseSSL -Credential $credential -Cycle Test2026 -RunRoot (Join-Path $temp 'Runs') 6>$null
     foreach($mode in @('Inventory','Backup','Prepare','Preflight','Apply','PostVerify','Dashboard')){if(-not@($global:MenuCalls|Where-Object{$_-like "$mode|*"}).Count){throw "Menu did not invoke $mode"}}
     if($global:MenuCalls-notcontains'Backup|SMB|False|1'){throw 'System-only backup choice was not passed'}
     if($global:MenuCalls-notcontains'Prepare|SMB|True|'){throw 'Automatic download/SMB choice was not passed'}

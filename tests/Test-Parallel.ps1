@@ -14,7 +14,7 @@ function Assert($Condition,[string]$Message){if(-not$Condition){throw $Message}}
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('SqlPatchParallelTest-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temp|Out-Null
 $Cycle='Test2026';$cycleRoot=$temp;$TargetListPath=Join-Path $temp 'targets.txt'
-$PackageRoot=$temp;$V2SourcePath=$temp;$Transport='WinRM';$Credential=$null
+$PackageRoot=$temp;$V2SourcePath=$temp;$Transport='WinRM';$Credential=New-Object Management.Automation.PSCredential ('REMOTE01\localadmin',(ConvertTo-SecureString 'test-only-placeholder' -AsPlainText -Force));$UseSSL=$true
 $CopyMethod='PowerShell';$CopyConcurrency=3;$ApplyConcurrency=2;$CopyLimitMBps=20;$ControllerCpuLimit=75
 $MinimumControllerFreeGB=2;$ControllerWaitSeconds=5;$ReadyTimeoutSeconds=20;$BackupChoice='0'
 $global:SqlPatchTestPressure=$false;$global:SqlPatchTestLocalAt=-1
@@ -33,7 +33,8 @@ function New-TestState {
     [pscustomobject]@{Cycle=$Cycle;Stage='PreflightReady';ScopeHash='';UpdatedUtc='';Packages=@();Servers=$entries}
 }
 $fake=@'
-param($Mode,$Cycle,$TargetListPath,$PackageRoot,$RunRoot,$Transport,$V2SourcePath,$WorkerTarget,$ConfirmApply,$BackupChoice,$ReadyTimeoutSeconds,$CopyLimitMBps)
+param($Mode,$Cycle,$TargetListPath,$PackageRoot,$RunRoot,$Transport,$V2SourcePath,$WorkerTarget,$ConfirmApply,$BackupChoice,$ReadyTimeoutSeconds,$CopyLimitMBps,$UseSSL,$Credential)
+if(-not$UseSSL-or$Credential.UserName-ne'REMOTE01\localadmin'){throw 'Worker lost HTTPS or credential settings.'}
 $path=Join-Path (Join-Path $RunRoot $Cycle) 'state.json'
 $s=Get-Content $path -Raw|ConvertFrom-Json
 $s.Servers[0]|Add-Member NoteProperty Started ([datetime]::UtcNow.ToString('o'))

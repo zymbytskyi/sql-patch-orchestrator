@@ -51,7 +51,7 @@ Write-Output '[PASS] Exact system-only COPY_ONLY, CHECKSUM, and VERIFYONLY backu
 Write-Output '[PASS] SQL Server 2017 backup-path fallback and time-zone-safe backup age evidence.'
 & (Join-Path $PSScriptRoot 'Test-WinRm.ps1')
 if($LASTEXITCODE-ne0){exit 1}
-foreach($suite in @('Test-Parallel.ps1','Test-Transfer.ps1','Test-Apply.ps1','Test-Smb.ps1','Test-Readiness.ps1','Test-Latest.ps1','Test-Updater.ps1','Test-Menu.ps1')){
+foreach($suite in @('Test-LocalTransport.ps1','Test-Parallel.ps1','Test-Transfer.ps1','Test-Apply.ps1','Test-Smb.ps1','Test-Readiness.ps1','Test-Latest.ps1','Test-Updater.ps1','Test-Menu.ps1')){
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot $suite)
     if($LASTEXITCODE-ne0){exit 1}
 }

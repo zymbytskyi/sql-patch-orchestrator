@@ -7,6 +7,7 @@ param(
     [string]$RunRoot,
     [ValidateSet('WinRM','PowerShellDirect')][string]$Transport='WinRM',
     [pscredential]$Credential,
+    [switch]$UseSSL,
     [ValidateSet('SMB','PowerShell')][string]$CopyMethod='SMB',
     [ValidateRange(1,8)][int]$CopyConcurrency=3,
     [ValidateRange(0,2147483647)][int]$ApplyConcurrency=0,
@@ -49,7 +50,7 @@ function Show-InventoryBlockers{
     Write-Host 'Fix the listed target, access, SQL, or standalone-safety issue, then run option 2 again.' -ForegroundColor Yellow
 }
 $Cycle=Select-PatchCycle $Cycle
-$common=@{Cycle=$Cycle;PackageRoot=$PackageRoot;RunRoot=$RunRoot;Transport=$Transport;CopyMethod=$CopyMethod;CopyConcurrency=$CopyConcurrency;ApplyConcurrency=$ApplyConcurrency;CopyLimitMBps=$CopyLimitMBps}
+$common=@{Cycle=$Cycle;PackageRoot=$PackageRoot;RunRoot=$RunRoot;Transport=$Transport;UseSSL=[bool]$UseSSL;CopyMethod=$CopyMethod;CopyConcurrency=$CopyConcurrency;ApplyConcurrency=$ApplyConcurrency;CopyLimitMBps=$CopyLimitMBps}
 if($Credential){$common.Credential=$Credential}
 $mutexBytes=[Text.Encoding]::UTF8.GetBytes($PSScriptRoot.ToLowerInvariant());$mutexSha=[Security.Cryptography.SHA256]::Create()
 try{$mutexId=([BitConverter]::ToString($mutexSha.ComputeHash($mutexBytes))).Replace('-','')}finally{$mutexSha.Dispose()}
