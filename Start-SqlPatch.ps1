@@ -8,4 +8,4 @@ if(-not([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Securit
     Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WindowStyle Normal -ArgumentList $arguments
     return
 }
-& (Join-Path $PSScriptRoot 'Start-SqlPatchV3Menu.ps1') -ApplyConcurrency 1
+& (Join-Path $PSScriptRoot 'Start-SqlPatchV3Menu.ps1') -ApplyConcurrency 8

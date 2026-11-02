@@ -10,7 +10,7 @@ param(
     [switch]$UseSSL,
     [ValidateSet('SMB','PowerShell')][string]$CopyMethod='SMB',
     [ValidateRange(1,8)][int]$CopyConcurrency=3,
-    [ValidateRange(0,2147483647)][int]$ApplyConcurrency=0,
+    [ValidateRange(0,2147483647)][int]$ApplyConcurrency=8,
     [ValidateRange(1,1024)][int]$CopyLimitMBps=20
 )
 Set-StrictMode -Version 2.0

@@ -15,3 +15,5 @@
 
 - v3.1.5: controller manual-restart guidance, bounded state-file lock retries and consistent PostVerify aggregation. Preserve fail-stop behavior for remote Apply failures and unknown installer outcomes.
 - v3.1.5 validation passed: full repository suite, real transient/persistent Windows file locks, actual PostVerify engine with SQL fixtures, controller no-reboot/build refresh fixtures, and installation from the release ZIP. No live SQL Apply was performed for this revision.
+- v3.1.6 sets the requested default Apply cap to eight remote hosts; monitor real controller capacity and concurrent application downtime as the target list grows.
+- v3.1.6 validation passed: full regression suite and offline ZIP installation; ten simulated remote targets reached an observed peak of eight real worker processes, with controller execution last. No SQL installation was run.

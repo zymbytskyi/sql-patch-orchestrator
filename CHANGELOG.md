@@ -1,3 +1,8 @@
+## 3.1.6 - 2026-11-02
+
+- Default to eight concurrent remote Apply hosts in the desktop launcher, menu and command-line engine. Additional targets queue; explicit overrides remain supported.
+- Preserve three concurrent copies, controller-last/manual restart behavior, resource admission gates and fail-stop dispatch.
+
 ## 3.1.5 - 2026-11-02
 
 - Keep controller SQL last with automatic restart disabled; refresh observed local builds and show a persistent manual-restart instruction after successful Setup.

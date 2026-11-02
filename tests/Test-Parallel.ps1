@@ -76,6 +76,19 @@ try{
     Assert ($lastStart-lt$firstFinish) 'All six remote workers did not overlap with ApplyConcurrency 0.'
     Assert ($global:SqlPatchTestLocalAt-eq6) 'Controller did not wait for all six remote hosts.'
     Assert ($state.Stage-eq'AwaitingControllerRestart') 'All-host Apply did not finish successfully.'
+    $ApplyConcurrency=8
+    $state=New-TestState -Count 10 -Local
+    Invoke-ParallelPhase $state Apply -EnginePath $allWorker
+    $remote=@($state.Servers|Where-Object {-not$_.IsController})
+    $peak=0
+    foreach($entry in $remote){
+        $at=[datetime]$entry.Started
+        $active=@($remote|Where-Object {([datetime]$_.Started)-le$at-and([datetime]$_.Finished)-gt$at}).Count
+        $peak=[math]::Max($peak,$active)
+    }
+    Assert ($peak-ge2-and$peak-le8) "Eight-host cap violated or no parallelism: $peak."
+    Assert ($global:SqlPatchTestLocalAt-eq10-and$state.Stage-eq'AwaitingControllerRestart') 'Controller started before ten remote targets finished.'
+    Write-Output "[PASS] Ten queued remote targets, requested cap 8, observed peak $peak; controller last."
     $ApplyConcurrency=2
     $state=New-TestState -Count 6 -Local -Fail '1'
     $failed=$false
