@@ -400,7 +400,19 @@ function Apply-OneServer {
     if(Get-PropertyValue $Entry NeedsReboot $false){
         if($local){
             Set-PropertyValue $Entry BootBeforeReboot $facts.Boot
-            Set-ServerState $State $server 'AwaitingControllerRestart' 'Controller SQL updated last. Restart this machine manually, then run PostVerify; remote targets are finished.'
+            # Refresh observed builds for the dashboard; restart is still mandatory even if SQL is available.
+            try{
+                $observed=Get-RemoteInventory $Session
+                foreach($instance in $Entry.Instances){
+                    $actual=@($observed.Instances|Where-Object InstanceName -eq $instance.InstanceName)
+                    if($actual.Count-eq1-and$actual[0].PSObject.Properties.Name-notcontains'Error'){
+                        $instance.Version=$actual[0].Version
+                        if($actual[0].PSObject.Properties.Name-contains'UpdateLevel'){$instance.UpdateLevel=$actual[0].UpdateLevel}
+                    }
+                }
+            }catch{Write-Warning "Local build refresh unavailable before restart: $($_.Exception.Message). Verify after manual restart."}
+            Set-ServerState $State $server 'AwaitingControllerRestart' 'SQL Setup completed on the controller. No automatic restart will be performed. Restart Windows manually, reopen the SAME cycle, then run option 6 (PostVerify).'
+            Write-Host 'ACTION REQUIRED: Restart this controller manually, then reopen the same cycle and run option 6 (PostVerify).' -ForegroundColor Yellow
             return
         }
         $before=Get-PropertyValue $Entry BootBeforeReboot ''

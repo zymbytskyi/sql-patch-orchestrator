@@ -1,3 +1,9 @@
+## 3.1.5 - 2026-11-02
+
+- Keep controller SQL last with automatic restart disabled; refresh observed local builds and show a persistent manual-restart instruction after successful Setup.
+- Retry atomic state replacement for transient Windows sharing/lock violations for up to five seconds. Persistent or unrelated errors still stop the operation; no non-atomic overwrite fallback.
+- Include instance failures in host PostVerify status and display exact failure details. Allow read-only PostVerify to resume an interrupted PostVerifying stage while retaining the original campaign stage.
+
 ## 3.1.4 - 2026-11-02
 
 - Select the highest numeric ProductVersion for each SQL major from reviewed local Microsoft EXEs. Validate all candidates and stop on invalid signatures or mismatched majors; retain older packages and report selection. Equal builds use filename order deterministically.

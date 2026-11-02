@@ -176,6 +176,23 @@ function New-TargetSession {
         throw
     }
 }
+function Write-AtomicStateFile {
+    param([string]$TemporaryPath,[string]$DestinationPath)
+    for($attempt=1;$attempt-le21;$attempt++){
+        try{
+            if(Test-Path -LiteralPath $DestinationPath){[IO.File]::Replace($TemporaryPath,$DestinationPath,[NullString]::Value)}
+            else{[IO.File]::Move($TemporaryPath,$DestinationPath)}
+            return
+        }catch{
+            $errorObject=$_.Exception
+            while($errorObject.InnerException){$errorObject=$errorObject.InnerException}
+            $win32=$errorObject.HResult-band0xffff
+            # Only transient sharing/lock violations are retried; preserve atomic replacement.
+            if($errorObject-isnot[IO.IOException]-or$win32-notin@(32,33)-or$attempt-eq21){throw}
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
 function Save-State {
     param($State)
     if (-not (Test-Path $cycleRoot)) { New-Item -ItemType Directory -Path $cycleRoot -Force | Out-Null }
@@ -187,7 +204,7 @@ function Save-State {
     $legacyTemp=$statePath+'.tmp';if(Test-Path -LiteralPath $legacyTemp -PathType Leaf){Remove-Item -LiteralPath $legacyTemp -Force -ErrorAction SilentlyContinue}
     try {
         [IO.File]::WriteAllText($temp,$json,[Text.UTF8Encoding]::new($false))
-        if(Test-Path -LiteralPath $statePath){[IO.File]::Replace($temp,$statePath,[NullString]::Value)}else{[IO.File]::Move($temp,$statePath)}
+        Write-AtomicStateFile -TemporaryPath $temp -DestinationPath $statePath
     }
     finally{if(Test-Path -LiteralPath $temp -PathType Leaf){Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue}}
     Write-Dashboard -State $State
@@ -222,7 +239,7 @@ function Write-Dashboard {
             $hostText+="<br><b>Readiness check: $((Encode-Html (Get-PropertyValue $server 'PreflightStatus' 'Not checked')))</b><br>$((Encode-Html (Get-PropertyValue $server 'PreflightDetails' '')))"
             $timeText="$((Encode-Html (Get-PropertyValue $server 'TimeZone' 'Unknown timezone'))) $((Encode-Html (Get-PropertyValue $server 'UtcOffset' '')))"
             $postStatus=Get-PropertyValue $instance 'PostVerifyStatus' 'Not run';$postClass=if($postStatus-eq'Passed'){'ok'}elseif($postStatus-eq'Failed'){'bad'}else{'warn'}
-            $postText="DB: $((Encode-Html (Get-PropertyValue $instance 'DatabaseSummary' 'Not checked')))<br>Engine: $((Encode-Html (Get-PropertyValue $instance 'EngineServiceSummary' 'Not checked')))<br>SQL auto services: $((Encode-Html (Get-PropertyValue $server 'SqlServiceSummary' 'Not checked')))<br><span class=`"muted`">$((Encode-Html (Get-PropertyValue $server 'PostVerifyWarnings' '')))</span>"
+            $postText="Details: $((Encode-Html (Get-PropertyValue $instance 'PostVerifyDetails' 'Not checked')))<br>DB: $((Encode-Html (Get-PropertyValue $instance 'DatabaseSummary' 'Not checked')))<br>Engine: $((Encode-Html (Get-PropertyValue $instance 'EngineServiceSummary' 'Not checked')))<br>SQL auto services: $((Encode-Html (Get-PropertyValue $server 'SqlServiceSummary' 'Not checked')))<br><span class=`"muted`">$((Encode-Html (Get-PropertyValue $server 'PostVerifyWarnings' '')))</span>"
             '<tr><td><b>{0}</b><br><span class="muted">{1}</span></td><td class="{2}"><b>{3}</b><br><span class="muted">SQL: {4}; standalone: {5}; sysadmin: {6}</span></td><td>{7}<br><span class="muted">{8}</span></td><td>{9}<br><span class="muted">target: {10}</span></td><td class="{11}"><b>copy: {12}</b><br>Folder: {31}<br>File: {32}<br>Transport: {33}<br>Verified UTC: {34}<br>SHA-256: {35}<br>verify: {13}<br><span class="muted">{14}; hash match: {15}</span><br><b>released: {16}</b><br><span class="muted">{17}; age: {18} day(s)</span></td><td class="{19}">{20}{21}</td><td>{22}</td><td>{23}<br><span class="muted">{24}</span></td><td class="{25}"><b>{26}</b><br>{27}</td><td class="{28}"><b>{29}</b><br><span class="muted">{30}</span></td></tr>' -f (Encode-Html $fullName),$timeText,$readinessClass,(Encode-Html $readiness),(Encode-Html (Get-PropertyValue $instance 'SqlReady' 'Unknown')),(Encode-Html (Get-PropertyValue $instance 'Standalone' 'Unknown')),(Encode-Html (Get-PropertyValue $instance 'Sysadmin' 'Unknown')),(Encode-Html $instance.Edition),(Encode-Html $instance.UpdateLevel),(Encode-Html $instance.Version),(Encode-Html $instance.TargetVersion),$packageClass,(Encode-Html $distributionState),(Encode-Html $packageState),(Encode-Html $packageName),(Encode-Html (Get-PropertyValue $instance 'PackageHashVerified' 'Not checked')),(Encode-Html $releaseDate),(Encode-Html (Get-PropertyValue $instance 'UpdateName' 'Not selected')),(Encode-Html $packageAge),$backupClass,$systemBackups,$(if($warnings.Count){"<br><span class=`"warn`">$((Encode-Html ($warnings-join'; ')))</span>"}),$userBackups,$hostText,(Encode-Html (Get-PropertyValue $server 'LastChangeUtc' $State.UpdatedUtc)),$postClass,(Encode-Html $postStatus),$postText,(Encode-Html $server.Status),(Encode-Html $server.Status),(Encode-Html $server.Message),(Encode-Html $(if(Get-PropertyValue $instance 'RemotePackagePath' ''){Split-Path $instance.RemotePackagePath -Parent}else{'Not staged'})),(Encode-Html (Get-PropertyValue $instance 'RemotePackagePath' 'Not staged')),(Encode-Html (Get-PropertyValue $instance 'CopyMethod' 'Not recorded')),(Encode-Html (Get-PropertyValue $instance 'PackageVerifiedUtc' 'Not checked')),(Encode-Html (Get-PropertyValue $instance 'PackageSha256' 'Not recorded'))
         }
     }
@@ -641,8 +658,8 @@ try {
         if($preflightFailed){exit 1};exit 0
     }
     if($Mode-eq'PostVerify'){
-        if($state.Stage-notin@('InventoryReady','Prepared','PreflightReady','Applying','Failed','Complete','PostVerified','PostVerifyFailed','AwaitingControllerRestart')){throw "PostVerify requires completed Inventory or a later stage; current stage is $($state.Stage)."}
-        $previousStage=$state.Stage;$baseStage=if($previousStage-in@('PostVerified','PostVerifyFailed')){Get-PropertyValue $state 'PostVerifyBaseStage' $previousStage}else{$previousStage};Set-PropertyValue $state PostVerifyBaseStage $baseStage;$postPatch=$baseStage-in@('Applying','Failed','Complete','AwaitingControllerRestart');$previousServerState=@{}
+        if($state.Stage-notin@('InventoryReady','Prepared','PreflightReady','Applying','Failed','Complete','PostVerified','PostVerifyFailed','PostVerifying','AwaitingControllerRestart')){throw "PostVerify requires completed Inventory or a later stage; current stage is $($state.Stage)."}
+        $previousStage=$state.Stage;$baseStage=if($previousStage-in@('PostVerified','PostVerifyFailed','PostVerifying')){Get-PropertyValue $state 'PostVerifyBaseStage' $previousStage}else{$previousStage};Set-PropertyValue $state PostVerifyBaseStage $baseStage;$postPatch=$baseStage-in@('Applying','Failed','Complete','AwaitingControllerRestart');$previousServerState=@{}
         foreach($entry in @($state.Servers)){$previousServerState[$entry.Server]=[pscustomobject]@{Status=$entry.Status;Message=$entry.Message}}
         $state.Stage='PostVerifying';Save-State $state;$failed=$false
         foreach($targetServer in $scope){
@@ -673,7 +690,8 @@ try {
                     foreach($serverIssue in $serverIssues){$issues.Add($serverIssue)}
                     if($issues.Count){Set-PropertyValue $instance PostVerifyStatus 'Failed';Set-PropertyValue $instance PostVerifyDetails ($issues-join'; ');$failed=$true}else{Set-PropertyValue $instance PostVerifyStatus 'Passed';Set-PropertyValue $instance PostVerifyDetails 'Two SQL probes, services, databases, build, and host checks passed'}
                 }
-                if($serverIssues.Count){Set-ServerState $state $server 'PostVerifyFailed' ($serverIssues-join'; ');$failed=$true}else{Set-ServerState $state $server 'PostVerified' 'Two SQL probes passed; selected databases are online/accessible and automatic SQL services are running'}
+                $instanceFailures=@($entry.Instances|Where-Object {(Get-PropertyValue $_ 'PostVerifyStatus' '')-eq'Failed'}|ForEach-Object {"$($_.InstanceName): $(Get-PropertyValue $_ 'PostVerifyDetails' '')"})
+                if($serverIssues.Count-or$instanceFailures.Count){Set-ServerState $state $server 'PostVerifyFailed' ((@($serverIssues)+$instanceFailures)-join'; ');$failed=$true}else{Set-ServerState $state $server 'PostVerified' 'Two SQL probes passed; selected databases are online/accessible and automatic SQL services are running'}
             }catch{$failed=$true;Set-PropertyValue $entry PostVerifyWarnings $_.Exception.Message;foreach($instance in @($entry.Instances)){Set-PropertyValue $instance PostVerifyStatus 'Failed';Set-PropertyValue $instance PostVerifyDetails $_.Exception.Message};Set-ServerState $state $server 'PostVerifyFailed' $_.Exception.Message}finally{if($session){Remove-TargetSession $session}}
         }
         if($failed){$state.Stage='PostVerifyFailed'}elseif($postPatch){$state.Stage='PostVerified'}else{$state.Stage=$previousStage;foreach($entry in @($state.Servers)){$prior=$previousServerState[$entry.Server];$entry.Status=$prior.Status;$entry.Message=$prior.Message}}

@@ -1,4 +1,4 @@
-# Offline installation and patching (v3.1.4)
+# Offline installation and patching (v3.1.5)
 
 Supports standalone SQL Server 2017 and later, not AG/FCI.
 Use Windows PowerShell 5.1 as Administrator with SQL sysadmin access.
@@ -7,23 +7,23 @@ Microsoft update EXEs are not included in the ZIP.
 
 ## Transfer and install
 
-Download SqlPatchOrchestrator-v3.1.4.zip and its SHA-256 file from the
-[v3.1.4 release](https://github.com/zymbytskyi/sql-patch-orchestrator/releases/tag/v3.1.4).
+Download SqlPatchOrchestrator-v3.1.5.zip and its SHA-256 file from the
+[v3.1.5 release](https://github.com/zymbytskyi/sql-patch-orchestrator/releases/tag/v3.1.5).
 Separately obtain approved Microsoft update EXEs for the installed SQL versions
 and servicing branches. Transfer these files into the isolated environment.
 
 Compare the archive hash with the release checksum:
 
-    Get-FileHash 'C:\Staging\SqlPatchOrchestrator-v3.1.4.zip' -Algorithm SHA256
+    Get-FileHash 'C:\Staging\SqlPatchOrchestrator-v3.1.5.zip' -Algorithm SHA256
 
 Extract into a fresh staging folder, not over the installed program:
 
-    Expand-Archive 'C:\Staging\SqlPatchOrchestrator-v3.1.4.zip' 'C:\Staging\v3.1.4'
+    Expand-Archive 'C:\Staging\SqlPatchOrchestrator-v3.1.5.zip' 'C:\Staging\v3.1.5'
 
-Double-click C:\Staging\v3.1.4\SqlPatchOrchestrator\Install.cmd and accept UAC,
+Double-click C:\Staging\v3.1.5\SqlPatchOrchestrator\Install.cmd and accept UAC,
 or run this in elevated Windows PowerShell:
 
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Staging\v3.1.4\SqlPatchOrchestrator\Install-SqlPatchOrchestrator.ps1"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Staging\v3.1.5\SqlPatchOrchestrator\Install-SqlPatchOrchestrator.ps1"
 
 Default destination: C:\SqlPatchOrchestrator. The installer verifies the
 included file manifest and creates **SQL Patch Orchestrator** on the public
@@ -43,10 +43,14 @@ Run the new staged installer with the same destination and confirm replacement.
 It preserves existing targets.txt, Packages and Runs. Do not extract the
 archive directly over these folders.
 
-Check C:\SqlPatchOrchestrator\VERSION: it must say **3.1.4**.
-Repeat Inventory, Prepare (source 1) and Readiness after the update.
+Check C:\SqlPatchOrchestrator\VERSION: it must say **3.1.5**.
+For a campaign not yet applied, repeat Inventory, Prepare (source 1) and Readiness.
 Existing campaign state does not automatically select a newly added EXE.
-Use the original cycle name to resume the same campaign.
+For an interrupted Apply/PostVerify, preserve Runs and use the original cycle
+name with option 6 first. Do not reset an in-flight campaign with Inventory.
+If remote targets verify successfully and only the controller remains below
+target, review prior Setup outcomes before resuming option 5 in that same cycle.
+Unknown outcomes remain blocked and require investigation.
 
 ## Add update files and targets
 
@@ -124,3 +128,17 @@ resolve trusted roots/revocation infrastructure; do not bypass the gate.
 - No package found: check SQL year, original filename and direct placement.
 - Invalid candidate: inspect the reported EXE; retain trusted, applicable media.
 - Old dashboard selection: rerun Inventory, Prepare/source 1 and Readiness.
+
+## Controller installation and interrupted verification (v3.1.5)
+
+The controller is patched after remote targets succeed. SQL services stop during
+installation, but the tool never automatically reboots the controller. After
+SQL Setup completes, the menu displays AwaitingControllerRestart. Restart Windows
+manually, reopen the same cycle and run option 6. A failed remote operation can
+defer controller patching; do not treat Deferred as an installed update.
+
+If PostVerify was interrupted, option 6 can safely repeat its read-only checks.
+An instance below its target build now makes the host PostVerifyFailed and its
+exact reason appears in the dashboard. PostVerify does not install missing updates.
+Transient state-file locks are retried for five seconds. Persistent file locks
+still require diagnosis; do not delete state or blindly repeat Apply.

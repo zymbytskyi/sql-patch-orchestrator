@@ -40,3 +40,6 @@ Thumbs.db
 
 !/tests/Test-LocalPackages.ps1
 !/tests/Test-OfflineInstall.ps1
+
+!/tests/Test-StateRecovery.ps1
+!/tests/Test-PostVerify.ps1

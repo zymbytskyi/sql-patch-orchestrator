@@ -19,7 +19,7 @@ try{
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'Install-SqlPatchOrchestrator.ps1') -Destination $dest -Force -NoDesktopShortcut
     if($LASTEXITCODE-ne0){throw 'Offline upgrade failed.'}
     foreach($name in @('targets.txt','Packages\fixture.txt','Runs\fixture.txt')){if([IO.File]::ReadAllText((Join-Path $dest $name))-ne'preserve'){throw "Upgrade changed $name"}}
-    if((Get-Content (Join-Path $dest 'VERSION')).Trim()-ne'3.1.4'){throw 'Installed version mismatch.'}
+    if((Get-Content (Join-Path $dest 'VERSION')).Trim()-ne'3.1.5'){throw 'Installed version mismatch.'}
     Write-Output '[PASS] Real offline install/upgrade, WScript shortcut, spaces and preserved runtime files.'
 }finally{
     $resolved=[IO.Path]::GetFullPath($testRoot)

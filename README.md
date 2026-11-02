@@ -1,9 +1,9 @@
-# SQL Patch Orchestrator V3.1.4
+# SQL Patch Orchestrator V3.1.5
 
-**v3.1.4 offline installation:** download the ZIP from [Releases](https://github.com/zymbytskyi/sql-patch-orchestrator/releases/tag/v3.1.4) and follow [OFFLINE-INSTALL.md](OFFLINE-INSTALL.md). The installer creates a desktop shortcut. Local preparation selects the highest numeric build from all matching Microsoft-signed EXEs; older files can remain in Packages.
+**v3.1.5 offline installation:** download the ZIP from [Releases](https://github.com/zymbytskyi/sql-patch-orchestrator/releases/tag/v3.1.5) and follow [OFFLINE-INSTALL.md](OFFLINE-INSTALL.md). The installer creates a desktop shortcut. Local preparation selects the highest numeric build from all matching Microsoft-signed EXEs; older files can remain in Packages.
 
 
-**Updating an existing server?** Follow [Offline upgrade](OFFLINE-INSTALL.md#upgrade-an-existing-installation). Opening the menu does not update the program. Close menus before replacing files; after installation, repeat Inventory, Prepare/source 1 and Readiness.
+**Updating an existing server?** Follow [Offline upgrade](OFFLINE-INSTALL.md#upgrade-an-existing-installation). Opening the menu does not update the program. Close menus before replacing files. For a campaign not yet applied, repeat Inventory, Prepare/source 1 and Readiness. For an interrupted Apply/PostVerify campaign, preserve its state and use the same cycle with option 6 first; do not reset it with Inventory.
 
 ## Open the menu — existing installation
 
@@ -55,7 +55,7 @@ No Git installation or repository clone is required on the controller. Install t
 
 ## Previous pinned online bootstrap (v3.1.3)
 
-For v3.1.4, use the offline ZIP and instructions above. The historical bootstrap below remains pinned to its tested v3.1.3 commit; it does not install v3.1.4.
+For v3.1.5, use the offline ZIP and instructions above. The historical bootstrap below remains pinned to its tested v3.1.3 commit; it does not install v3.1.5.
 
 The same bootstrap handles new installations and upgrades. It installs **v3.1.3 plus the local-execution/workgroup fix and setup-process diagnostics**, pinned to commit `3a5643380cbf5397060bef47962304750436d750`. Git is not required on the server. It downloads and verifies program files, preserves existing scope/media/run data, and backs up replaced program files.
 

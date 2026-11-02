@@ -52,6 +52,8 @@ try{
     $state=New-Case;$global:ApplyFixture.Identity='CONTROLLER';$state.Servers[0].HostIdentity='CONTROLLER'
     Apply-OneServer $state $state.Servers[0] 'SESSION'
     Assert ($state.Servers[0].Status-eq'AwaitingControllerRestart'-and$global:ApplyFixture.RebootCount-eq0) 'Controller was restarted automatically.'
+    Assert ($global:ApplyFixture.InstallCount-eq1-and$state.Servers[0].Instances[0].Version-eq'16.0.2.0') 'Local Setup/build refresh did not complete.'
+    Assert ($state.Servers[0].Message-match'No automatic restart'-and$state.Servers[0].NeedsReboot) 'Manual restart instruction or restart journal missing.'
     foreach($scenario in @('Identity','Hadr','SetupRunning','UnknownOutcome','InstallerFailure')){
         $state=New-Case
         switch($scenario){

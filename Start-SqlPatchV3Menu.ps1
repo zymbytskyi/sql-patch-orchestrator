@@ -62,6 +62,11 @@ try{while($true){
     Write-Host '====================================='
     Write-Host ('Version: '+(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'VERSION') -Raw).Trim())
     Write-Host "Cycle: $Cycle"
+    $currentState=Get-CycleState
+    if($currentState-and$currentState.Stage-eq'AwaitingControllerRestart'){
+        Write-Host 'SQL Setup completed locally. Windows has NOT been restarted automatically.' -ForegroundColor Yellow
+        Write-Host 'Restart this controller manually; reopen this SAME cycle and select 6 (PostVerify).' -ForegroundColor Yellow
+    }
     $applyLabel=if($ApplyConcurrency-eq0){'ALL remote hosts (resource gates apply)'}else{[string]$ApplyConcurrency}
     Write-Host "Transfer: $CopyMethod | Parallel limits: copy $CopyConcurrency (up to $CopyLimitMBps MiB/s each); Apply $applyLabel"
     Write-Host 'Controller SQL runs last; controller restart is manual after remote targets finish.'
