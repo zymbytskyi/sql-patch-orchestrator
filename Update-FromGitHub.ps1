@@ -87,7 +87,7 @@ try{
     $headers=@{'User-Agent'='SqlPatchOrchestrator-Updater';Accept='application/vnd.github+json'}
     $tree=Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/git/trees/${Commit}?recursive=1" -Headers $headers -ErrorAction Stop
     if($tree.truncated){throw 'GitHub returned a truncated file tree.'}
-    $files=@('Invoke-SqlPatchV3Remote.ps1','SqlPatchParallel.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2Local/Invoke-SqlPatchV2Local.ps1','SqlPatchV2Local/SqlPatchUpdates.ps1','SqlPatchV2Local/README.md','README.md','CHANGELOG.md','RELEASE-NOTES.md','SECURITY.md','LICENSE','VERSION','Update-FromGitHub.ps1')
+    $files=@('Invoke-SqlPatchV3Remote.ps1','SqlPatchParallel.ps1','Start-SqlPatchV3Menu.ps1','SqlPatchV2Local/Invoke-SqlPatchV2Local.ps1','SqlPatchV2Local/SqlPatchUpdates.ps1','SqlPatchV2Local/README.md','README.md','OFFLINE-INSTALL.md','Start-SqlPatch.ps1','Start-SqlPatch.cmd','CHANGELOG.md','RELEASE-NOTES.md','SECURITY.md','LICENSE','VERSION','Update-FromGitHub.ps1')
     $stage=Join-Path ([IO.Path]::GetTempPath()) ('SqlPatchUpdate-'+[guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stage|Out-Null
     $hashes=@{}

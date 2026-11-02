@@ -37,3 +37,6 @@ Thumbs.db
 !/tests/Test-Latest.ps1
 !/tests/Test-Menu.ps1
 !/tests/Test-LocalTransport.ps1
+
+!/tests/Test-LocalPackages.ps1
+!/tests/Test-OfflineInstall.ps1

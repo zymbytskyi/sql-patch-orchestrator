@@ -1,3 +1,9 @@
+## 3.1.4 - 2026-11-02
+
+- Select the highest numeric ProductVersion for each SQL major from reviewed local Microsoft EXEs. Validate all candidates and stop on invalid signatures or mismatched majors; retain older packages and report selection. Equal builds use filename order deterministically.
+- Add offline installation/update instructions, an elevated menu launcher, and a desktop shortcut (all users by default, optional opt-out). The launcher defaults to serial Apply and only opens the menu.
+- Include the offline guide and launchers in release ZIPs and program updates. Existing targets, packages, and run evidence are preserved.
+
 ## 3.1.3 — 2026-10-25
 
 - ApplyConcurrency 0 (new default) runs all eligible remote hosts concurrently. Positive values provide an explicit cap; the former four-host maximum is removed.

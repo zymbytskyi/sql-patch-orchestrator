@@ -1,11 +1,11 @@
 <# .SYNOPSIS Builds a ZIP with a top-level SqlPatchOrchestrator folder. #>
 #Requires -Version 5.1
 [CmdletBinding()]
-param([ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version='3.1.3',[string]$OutputDirectory)
+param([ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version='3.1.4',[string]$OutputDirectory)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 if([string]::IsNullOrWhiteSpace($OutputDirectory)){$OutputDirectory=Join-Path $PSScriptRoot 'Release'}
-$files=@('Invoke-SqlPatchV3Remote.ps1','SqlPatchParallel.ps1','Start-SqlPatchV3Menu.ps1','Install-SqlPatchOrchestrator.ps1','Install-FromGitHub.ps1','Install.cmd','targets.txt','README.md','SECURITY.md','LICENSE','VERSION')
+$files=@('Invoke-SqlPatchV3Remote.ps1','SqlPatchParallel.ps1','Start-SqlPatchV3Menu.ps1','Install-SqlPatchOrchestrator.ps1','Install-FromGitHub.ps1','Install.cmd','targets.txt','README.md','OFFLINE-INSTALL.md','Start-SqlPatch.ps1','Start-SqlPatch.cmd','SECURITY.md','LICENSE','VERSION')
 foreach($name in $files){if(-not(Test-Path (Join-Path $PSScriptRoot $name) -PathType Leaf)){throw "Missing release file '$name'."}}
 if(-not(Test-Path (Join-Path $PSScriptRoot 'SqlPatchV2Local\Invoke-SqlPatchV2Local.ps1') -PathType Leaf)){throw 'Bundled V2 worker is missing.'}
 $buildRoot=Join-Path ([IO.Path]::GetTempPath()) ('SqlPatchOrchestrator-'+[guid]::NewGuid().ToString('N'))
@@ -23,6 +23,13 @@ try{
     $zipPath=Join-Path $OutputDirectory "SqlPatchOrchestrator-v$Version.zip"
     if(Test-Path $zipPath){Remove-Item -LiteralPath $zipPath -Force}
     Compress-Archive -LiteralPath $payloadRoot -DestinationPath $zipPath -CompressionLevel Optimal
+    $checksum=(Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash+' *'+[IO.Path]::GetFileName($zipPath)
+    [IO.File]::WriteAllText(($zipPath+'.sha256'),$checksum+[Environment]::NewLine,[Text.Encoding]::ASCII)
     Write-Output $zipPath
-}finally{if(Test-Path $buildRoot){Remove-Item -LiteralPath $buildRoot -Recurse -Force}}
+}finally{
+    $resolvedBuild=[IO.Path]::GetFullPath($buildRoot)
+    $tempPrefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
+    if(-not$resolvedBuild.StartsWith($tempPrefix,[StringComparison]::OrdinalIgnoreCase)-or(Split-Path $resolvedBuild -Leaf)-notlike'SqlPatchOrchestrator-*'){throw 'Unsafe build cleanup path.'}
+    if(Test-Path -LiteralPath $resolvedBuild){Remove-Item -LiteralPath $resolvedBuild -Recurse -Force}
+}
 

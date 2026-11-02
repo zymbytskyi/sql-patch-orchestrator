@@ -331,8 +331,14 @@ function Get-PackageMap {
     $majors=@($State.Servers|ForEach-Object Instances|ForEach-Object Major|Sort-Object -Unique)
     foreach($major in $majors){
         $year=$supported[[int]$major];$files=@(Get-ChildItem -LiteralPath $PackageRoot -Filter "SQLServer$year-KB*-x64.exe" -File -ErrorAction SilentlyContinue)
-        if($files.Count-ne1){throw "Expected exactly one SQL Server $year package in '$PackageRoot'; found $($files.Count)."}
-        $map[[string]$major]=New-PackageRecord -Path $files[0].FullName -Major ([int]$major)
+        if(-not$files.Count){throw "No SQL Server $year update package found in '$PackageRoot'."}
+        # Validate every candidate before ranking; never silently fall back from invalid media.
+        $candidates=@(foreach($file in $files){New-PackageRecord -Path $file.FullName -Major ([int]$major)})
+        $ranked=@($candidates|Sort-Object -Property @{Expression={[version]$_.Version};Descending=$true},Name)
+        $selected=$ranked[0]
+        $map[[string]$major]=$selected
+        Write-Host ("Selected SQL Server {0}: {1}, build {2} (highest of {3} local package(s))." -f $year,$selected.Name,$selected.Version,$files.Count)
+        foreach($other in @($ranked|Select-Object -Skip 1)){Write-Host ("Not selected: {0}, build {1}; retained in Packages." -f $other.Name,$other.Version)}
     }
     $map
 }
